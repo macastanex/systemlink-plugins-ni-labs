@@ -3,8 +3,9 @@
 /* =========================================================================
  * ATML Viewer — SystemLink web app
  * Browses File Service files, then renders ATML test results or generic XML.
- * All API calls are same-origin relative paths so the SystemLink session
- * cookie authenticates them through the web ingress.
+ * Production API calls are same-origin relative paths so the SystemLink
+ * session cookie authenticates them through the web ingress. The local demo
+ * server enables the in-browser mock in demo-api.js instead.
  * ========================================================================= */
 
 const FILE_API = '/nifile/v1';
@@ -59,7 +60,8 @@ async function fetchWithRetry(url, opts = {}, { retries = 6, baseDelay = 500 } =
   for (let attempt = 0; ; attempt++) {
     let res;
     try {
-      res = await fetch(url, opts);
+      const demoFetch = window.__ATML_DEMO_API__ && window.__ATML_DEMO_API__.fetch;
+      res = await (demoFetch ? demoFetch(url, opts) : fetch(url, opts));
     } catch (netErr) {
       if (attempt >= retries) throw netErr;
       await sleep(baseDelay * 2 ** attempt + Math.random() * 250);
@@ -107,7 +109,7 @@ async function fetchWorkspaces() {
 // so a lookup failure never blocks a user the server would actually allow.
 async function loadPrivileges() {
   try {
-    const res = await fetch('/niauth/v1/auth', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
+    const res = await fetchWithRetry('/niauth/v1/auth', { credentials: 'same-origin', headers: { Accept: 'application/json' } });
     if (!res.ok) { console.warn('[auth] /niauth/v1/auth failed', res.status, res.statusText); return; }
     const data = await res.json();
     state.authStatements = (data.policies || []).flatMap((p) => p.statements || []);
@@ -575,12 +577,16 @@ function renderAtml(doc, container) {
   // down arrow expands them (giving the step data more room).
   const collapseBar = el('div', { class: 'rh-collapse-bar' });
   const handle = el('button', { class: 'rh-handle', attrs: { type: 'button', 'aria-expanded': 'true', 'aria-label': 'Collapse details', title: 'Collapse details' } });
-  handle.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 15l6-6 6 6"/></svg>';
+  const collapseIcon = el('nimble-icon-arrow-up-two-rectangles', { attrs: { 'aria-hidden': 'true' } });
+  const expandIcon = el('nimble-icon-arrow-down-two-rectangles', { attrs: { 'aria-hidden': 'true', hidden: '' } });
+  handle.append(collapseIcon, expandIcon);
   handle.addEventListener('click', () => {
     const collapsed = header.classList.toggle('is-collapsed');
     handle.setAttribute('aria-expanded', String(!collapsed));
     handle.title = collapsed ? 'Show details' : 'Collapse details';
     handle.setAttribute('aria-label', collapsed ? 'Show details' : 'Collapse details');
+    collapseIcon.hidden = collapsed;
+    expandIcon.hidden = !collapsed;
   });
   collapseBar.appendChild(handle);
   container.appendChild(collapseBar);
@@ -2557,6 +2563,8 @@ function wireUploadDrawer() {
 
 function init() {
   initTheme();
+  const demoBadge = $('#demo-badge');
+  if (demoBadge && window.__ATML_DEMO_MODE__) demoBadge.hidden = false;
   const searchField = $('#file-search');
   const searchClear = $('#file-search-clear');
   // Nimble's :host display beats the [hidden] attr, so toggle via style.display.

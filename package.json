@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",
+    "start": "npm run start --workspace atml-file-manager",
     "package": "npm run package --workspaces --if-present",
     "submission-manifest": "npm run submission-manifest --workspaces --if-present"
   },

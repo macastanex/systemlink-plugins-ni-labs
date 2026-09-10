@@ -55,13 +55,16 @@ body {
   flex-shrink: 0;
 }
 .brand { display: flex; align-items: center; gap: 12px; }
-.brand-logo { width: 30px; height: 30px; color: var(--accent); }
 .app-header h1 { font: var(--ni-nimble-title-font); margin: 0; }
 .subtitle { margin: 0; font: var(--ni-nimble-body-font); color: var(--text-muted); }
 
 /* Header action buttons (search / import) */
 .header-actions { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .header-actions [hidden] { display: none !important; }
+.demo-badge {
+  padding: 4px 8px; border: 1px solid var(--accent); color: var(--accent);
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+}
 .header-btn {
   display: inline-flex; align-items: center; gap: 8px;
   padding: 8px 16px; border: 1px solid color-mix(in srgb, var(--ni-nimble-body-font-color) 20%, transparent);
@@ -219,18 +222,19 @@ body {
 .result-header.is-collapsed { display: none; }
 .rh-collapse-bar {
   display: flex; justify-content: center; align-items: center;
-  height: 18px; background: var(--surface); overflow: visible;
+  height: 24px; background: var(--surface); overflow: visible;
 }
 .rh-handle {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 44px; height: 16px; padding: 0;
-  border: none; border-radius: 0;
-  background: transparent; color: var(--text-muted);
+  width: 52px; height: 22px; padding: 0;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, transparent); border-radius: 2px;
+  background: var(--surface-2); color: var(--accent);
   cursor: pointer; transition: background .12s, color .12s;
 }
-.rh-handle:hover { background: var(--surface-2); color: var(--text); }
-.rh-handle svg { width: 18px; height: 12px; transition: transform .15s; }
-.rh-handle[aria-expanded="false"] svg { transform: rotate(180deg); }
+.rh-handle:hover { background: var(--accent-weak); color: var(--accent); }
+.rh-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.rh-handle nimble-icon-arrow-up-two-rectangles,
+.rh-handle nimble-icon-arrow-down-two-rectangles { width: 22px; height: 16px; }
 .rh-fields {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
