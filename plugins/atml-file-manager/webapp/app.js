@@ -114,6 +114,7 @@ async function loadPrivileges() {
     const data = await res.json();
     state.authStatements = (data.policies || []).flatMap((p) => p.statements || []);
     updateUploadOkDisabled();
+    updateDeleteButton();
   } catch (e) {
     console.warn('[auth] privilege lookup error', e);
   }
@@ -356,6 +357,7 @@ function showSearchPage() {
   const nav = $('#nav-search');
   if (nav) nav.checked = true;
   updateHeaderButtons();
+  updateDeleteButton();
 }
 function showViewerPage() {
   state.view = 'viewer';
@@ -382,6 +384,7 @@ function openXml(text, name, id, file) {
   $('#viewer').hidden = false;
   $('#viewer-filename').textContent = name;
   $('#download-btn').onclick = () => downloadFile(id, name);
+  updateDeleteButton();
 
   const parser = new DOMParser();
   const doc = parser.parseFromString(text, 'application/xml');
@@ -428,6 +431,8 @@ function setFormatBadge(label, isAtml) {
 }
 
 function showViewerError(name, msg) {
+  state.currentFile = null;
+  updateDeleteButton();
   showViewerPage();
   $('#viewer').hidden = false;
   $('#viewer-filename').textContent = name;
@@ -450,6 +455,40 @@ async function downloadFile(id, name) {
     URL.revokeObjectURL(url);
   } catch (e) {
     alert(e.message);
+  }
+}
+
+function updateDeleteButton() {
+  const button = $('#delete-btn');
+  if (!button) return;
+  const file = state.currentFile;
+  const visible = !!(file && file.id);
+  button.style.display = visible ? '' : 'none';
+  button.disabled = visible && !can(PERM.deleteFile, file.workspace);
+}
+
+async function deleteCurrentFile() {
+  const file = state.currentFile;
+  if (!file || !file.id) return;
+  if (!can(PERM.deleteFile, file.workspace)) {
+    alert('You do not have permission to delete this file.');
+    return;
+  }
+  const name = fileName(file);
+  if (!window.confirm(`Delete "${name}"?`)) return;
+  const button = $('#delete-btn');
+  if (button) button.disabled = true;
+  try {
+    await deleteFiles([file.id]);
+    state.currentFile = null;
+    state.currentDoc = null;
+    state.currentRawText = '';
+    state.selectedId = null;
+    showSearchPage();
+    await loadFiles();
+  } catch (e) {
+    alert(e.message);
+    updateDeleteButton();
   }
 }
 
@@ -486,6 +525,27 @@ function firstByLocal(node, local) {
   };
   return walk(node);
 }
+function allByLocal(node, local) {
+  const wanted = local.toLowerCase();
+  const found = [];
+  const walk = (n) => {
+    for (const c of Array.from(n.children)) {
+      if ((c.localName || '').toLowerCase() === wanted) found.push(c);
+      walk(c);
+    }
+  };
+  walk(node);
+  return found;
+}
+function resultSetsFor(doc) {
+  const root = doc.documentElement;
+  if (!root) return [];
+  const testResults = root && (root.localName || '').toLowerCase() === 'testresults'
+    ? [root]
+    : allByLocal(root, 'TestResults');
+  if (testResults.length) return testResults.flatMap((results) => allByLocal(results, 'ResultSet'));
+  return allByLocal(root, 'ResultSet');
+}
 function attr(node, name) {
   if (!node) return null;
   // try direct, then namespace-agnostic
@@ -503,8 +563,8 @@ const STEP_LOCALS = ['Test', 'SessionAction', 'TestGroup'];
 
 function renderAtml(doc, container) {
   const results = firstByLocal(doc, 'TestResults') || doc.documentElement;
-  const resultSet = firstByLocal(results, 'ResultSet');
-  if (!resultSet) {
+  const resultSets = resultSetsFor(doc);
+  if (!resultSets.length) {
     container.appendChild(el('div', { class: 'error-box', text: 'ATML file recognized but no ResultSet was found.' }));
     return;
   }
@@ -513,12 +573,12 @@ function renderAtml(doc, container) {
   const operator = attr(firstByLocal(results, 'SystemOperator'), 'name');
   const uut = textOf(firstByLocal(firstChildByLocal(results, 'UUT') || results, 'SerialNumber'));
   const station = textOf(firstByLocal(firstChildByLocal(results, 'TestStation') || results, 'SerialNumber'));
-  const overall = outcomeOf(resultSet);
-  const start = attr(resultSet, 'startDateTime');
-  const end = attr(resultSet, 'endDateTime');
-  const rsName = attr(resultSet, 'name') || 'Test Results';
+  const overall = aggregateOutcome(resultSets.map(outcomeOf));
+  const start = earliestDate(resultSets.map((rs) => attr(rs, 'startDateTime')));
+  const end = latestDate(resultSets.map((rs) => attr(rs, 'endDateTime')));
+  const rsNames = resultSets.map((rs) => attr(rs, 'name') || 'Test Results');
 
-  const nodes = [buildResultSetRootNode(resultSet)];
+  const nodes = resultSets.map(buildResultSetRootNode);
   const stats = { passed: 0, failed: 0, done: 0, other: 0, total: 0 };
   countStats(nodes, stats);
   state.currentFilterMode = 'all';
@@ -560,7 +620,7 @@ function renderAtml(doc, container) {
   // ATML test-result metadata.
   header.appendChild(el('div', { class: 'rh-group-title', text: 'Test Result' }));
   const fields = el('div', { class: 'rh-fields' });
-  addField(fields, 'Test program', prettySequenceName(rsName));
+  addField(fields, resultSets.length === 1 ? 'Test program' : 'Test programs', rsNames.map(prettySequenceName).join(', '));
   const statusVal = el('span', { class: 'rh-status ' + outcomeClass(overall) });
   statusVal.appendChild(statusIcon(overall));
   statusVal.appendChild(el('span', { class: 'rh-status-text', text: overall || 'Unknown' }));
@@ -576,9 +636,9 @@ function renderAtml(doc, container) {
   // Centered handle on the panel's bottom edge: up arrow collapses the details,
   // down arrow expands them (giving the step data more room).
   const collapseBar = el('div', { class: 'rh-collapse-bar' });
-  const handle = el('button', { class: 'rh-handle', attrs: { type: 'button', 'aria-expanded': 'true', 'aria-label': 'Collapse details', title: 'Collapse details' } });
-  const collapseIcon = el('nimble-icon-arrow-up-two-rectangles', { attrs: { 'aria-hidden': 'true' } });
-  const expandIcon = el('nimble-icon-arrow-down-two-rectangles', { attrs: { 'aria-hidden': 'true', hidden: '' } });
+  const handle = el('nimble-button', { class: 'rh-handle', attrs: { appearance: 'ghost', 'content-hidden': '', 'aria-expanded': 'true', 'aria-label': 'Collapse details', title: 'Collapse details' } });
+  const collapseIcon = el('nimble-icon-arrow-expander-up', { attrs: { slot: 'start', 'aria-hidden': 'true' } });
+  const expandIcon = el('nimble-icon-arrow-expander-down', { attrs: { slot: 'start', 'aria-hidden': 'true', hidden: '' } });
   handle.append(collapseIcon, expandIcon);
   handle.addEventListener('click', () => {
     const collapsed = header.classList.toggle('is-collapsed');
@@ -727,6 +787,29 @@ function resultSetStepName(rs) {
   const raw = attr(rs, 'name') || '';
   const seq = raw.includes('#') ? raw.slice(raw.lastIndexOf('#') + 1) : (raw || 'MainSequence');
   return /callback/i.test(seq) ? seq : `${seq} Callback`;
+}
+
+function aggregateOutcome(outcomes) {
+  const normalized = outcomes.filter(Boolean).map((value) => value.trim().toLowerCase());
+  if (normalized.some((value) => ['failed', 'error', 'errored'].includes(value))) return 'Failed';
+  if (normalized.some((value) => value === 'terminated')) return 'Terminated';
+  if (normalized.some((value) => value === 'timed out')) return 'Timed Out';
+  if (normalized.some((value) => value === 'running')) return 'Running';
+  if (normalized.some((value) => value === 'skipped')) return 'Skipped';
+  if (normalized.length && normalized.every((value) => value === 'passed')) return 'Passed';
+  if (normalized.length && normalized.every((value) => value === 'done')) return 'Done';
+  return normalized[0] || null;
+}
+function validDates(values) {
+  return values.map((value) => value && new Date(value)).filter((date) => date && !isNaN(date));
+}
+function earliestDate(values) {
+  const dates = validDates(values);
+  return dates.length ? new Date(Math.min(...dates.map((date) => date.getTime()))).toISOString() : null;
+}
+function latestDate(values) {
+  const dates = validDates(values);
+  return dates.length ? new Date(Math.max(...dates.map((date) => date.getTime()))).toISOString() : null;
 }
 
 // The ResultSet itself is the root step of the tree (its steps are its children).
@@ -2173,11 +2256,15 @@ async function tmCreateSteps(steps, onProgress) {
     await Promise.all(Array.from({ length: Math.min(STEP_CONCURRENCY, batches.length) }, worker));
   }
 }
-async function findResultsByChecksum(checksum) {
+function resourceWorkspaceId(resource) {
+  return resource && (resource.workspace || resource.workspaceId || resource.workspace_id) || '';
+}
+async function findResultsByChecksum(checksum, workspaceId) {
+  if (!workspaceId) return [];
   const data = await tmPost('query-results', {
     filter: 'properties["ATML Checksum"] == @0', substitutions: [checksum], take: 100, returnCount: true,
   });
-  return data.results || [];
+  return (data.results || []).filter((result) => resourceWorkspaceId(result) === workspaceId);
 }
 async function tmDeleteResults(ids) {
   if (!ids.length) return;
@@ -2194,7 +2281,8 @@ async function tmUpdateResultProperties(resultId, properties) {
 // search-files endpoint (more performant than paging query-files). Returns the
 // list of matching file ids. The property key has a space, so the field name is
 // escaped Lucene-style; the original quoted form is kept as a fallback.
-async function findFilesByChecksum(checksum) {
+async function findFilesByChecksum(checksum, workspaceId) {
+  if (!workspaceId) return [];
   const safe = String(checksum).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
   const filters = [
     `properties.ATML\\ Checksum:"${safe}"`,
@@ -2209,7 +2297,10 @@ async function findFilesByChecksum(checksum) {
       });
       const data = await res.json();
       const files = data.availableFiles || data.files || data.value || [];
-      const ids = files.map((f) => f.id).filter(Boolean);
+      const ids = files
+        .filter((file) => resourceWorkspaceId(file) === workspaceId)
+        .map((f) => f.id)
+        .filter(Boolean);
       if (ids.length) return ids;
     } catch { /* try the next filter form */ }
   }
@@ -2227,6 +2318,15 @@ async function updateFileMetadata(fileId, properties) {
     method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify({ replaceExisting: false, properties }),
   });
+}
+async function deleteExistingArtifacts(results, fileIds, sourceFileId) {
+  if (results.length) await tmDeleteResults(results.map((result) => result.id));
+  const idsToDelete = fileIds.filter((id) => id !== sourceFileId);
+  if (idsToDelete.length) await deleteFiles(idsToDelete);
+}
+async function cleanupCreatedResult(resultId, fileId, deleteFile) {
+  await tmDeleteResults([resultId]).catch((error) => console.warn('[import] cleanup result failed', error));
+  if (deleteFile) await deleteFiles([fileId]).catch((error) => console.warn('[import] cleanup file failed', error));
 }
 
 function toIso(dt) {
@@ -2276,18 +2376,22 @@ function extractPartNumber(results) {
 // reusing the same node tree the viewer renders.
 function buildResultAndSteps(doc, opts) {
   const results = firstByLocal(doc, 'TestResults') || doc.documentElement;
-  const resultSet = firstByLocal(results, 'ResultSet');
-  const rootNode = buildResultSetRootNode(resultSet);
+  const resultSets = resultSetsFor(doc);
+  if (!resultSets.length) throw new Error('ATML file contains no ResultSet.');
+  const rootNodes = resultSets.map(buildResultSetRootNode);
 
   const operator = attr(firstByLocal(results, 'SystemOperator'), 'name') || null;
   const uutEl = firstChildByLocal(results, 'UUT');
   const serial = textOf(firstByLocal(uutEl || results, 'SerialNumber')) || null;
   const stationSerial = textOf(firstByLocal(firstChildByLocal(results, 'TestStation') || results, 'SerialNumber')) || null;
   const partNumber = extractPartNumber(results);
-  const rootStatus = statusObjectFor(rootNode);
+  const rootStatus = statusObjectFor({ outcome: aggregateOutcome(resultSets.map(outcomeOf)) });
+  const resultSetNames = resultSets.map((resultSet) => prettySequenceName(attr(resultSet, 'name')));
+  const startedAt = earliestDate(rootNodes.map((node) => node.start));
+  const totalTimeInSeconds = rootNodes.reduce((total, node) => total + (node.time != null && !isNaN(node.time) ? node.time : 0), 0);
 
   const resultRequest = {
-    programName: prettySequenceName(attr(resultSet, 'name')) || 'ATML Result',
+    programName: resultSetNames.join(', ') || 'ATML Result',
     status: rootStatus,
     systemId: stationSerial || undefined,
     hostName: stationSerial || undefined,
@@ -2296,8 +2400,8 @@ function buildResultAndSteps(doc, opts) {
     serialNumber: serial || undefined,
     operator: operator || undefined,
     partNumber: partNumber || undefined,
-    startedAt: toIso(rootNode.start),
-    totalTimeInSeconds: (rootNode.time != null && !isNaN(rootNode.time)) ? rootNode.time : 0,
+    startedAt: toIso(startedAt),
+    totalTimeInSeconds,
     workspace: opts.workspaceId || undefined,
     fileIds: opts.fileId ? [opts.fileId] : undefined,
   };
@@ -2341,7 +2445,7 @@ function buildResultAndSteps(doc, opts) {
       steps.push(buildStepRequest(node, resultId, parentStepId, stepId));
       for (const child of (node.children || [])) walk(child, stepId);
     };
-    walk(rootNode, 'root');
+    for (const rootNode of rootNodes) walk(rootNode, 'root');
     return steps;
   }
 
@@ -2351,9 +2455,18 @@ function buildResultAndSteps(doc, opts) {
 // Import a single queued file. Returns { state, detail, fileId, resultId }.
 async function importOneFile(q, opts) {
   const isServiceFile = !!q.serviceFileId;
+  const workspaceId = isServiceFile ? (q.workspace || opts.workspaceId) : opts.workspaceId;
+  if (!workspaceId) throw new Error('Select a workspace before importing.');
   const text = q.text != null ? q.text : await q.file.text();
   const checksum = await sha256Hex(text);
   q.checksum = checksum;
+
+  let doc = null;
+  if (opts.createResults || isServiceFile) {
+    doc = new DOMParser().parseFromString(text, 'application/xml');
+    if (doc.querySelector('parsererror')) throw new Error('File is not valid XML.');
+    if (!isAtml(doc)) throw new Error('File is not recognized as ATML.');
+  }
 
   // A file already in the service (the one being viewed) is always imported as a
   // result — there is nothing to upload, so the upload-only path doesn't apply.
@@ -2361,21 +2474,23 @@ async function importOneFile(q, opts) {
     // Dedup by checksum even when not creating results: a file already in the
     // service (orphan upload or one linked to a prior result) must not be
     // uploaded again unless the user opted to replace.
-    const priorResults = await findResultsByChecksum(checksum);
+    const priorResults = await findResultsByChecksum(checksum, workspaceId);
     const fileIdsFromResults = [...new Set(priorResults.flatMap((r) => r.fileIds || []))];
-    const orphanFiles = await findFilesByChecksum(checksum);
+    const orphanFiles = await findFilesByChecksum(checksum, workspaceId);
     const existingFileIds = [...new Set([...fileIdsFromResults, ...orphanFiles])];
 
     if (existingFileIds.length && !opts.replace) {
       return { state: 'skipped', detail: `Skipped — a file with this checksum already exists (${existingFileIds.length} file(s)). Enable "Replace existing files/results?" to overwrite.` };
     }
-    if (existingFileIds.length && opts.replace) {
-      if (priorResults.length) await tmDeleteResults(priorResults.map((r) => r.id));
-      await deleteFiles(existingFileIds);
-    }
     const id = await uploadFileToService(q.file, opts.workspaceId);
-    await updateFileMetadata(id, { 'ATML Checksum': checksum }).catch((e) => console.warn('[import] set ATML Checksum failed for file', id, e));
-    const replaced = existingFileIds.length && opts.replace;
+    try {
+      await updateFileMetadata(id, { 'ATML Checksum': checksum });
+    } catch (e) {
+      await deleteFiles([id]).catch((cleanupError) => console.warn('[import] cleanup after metadata failure failed', cleanupError));
+      throw new Error(`File uploaded but its checksum metadata could not be saved: ${e.message}`);
+    }
+    const replaced = existingFileIds.length > 0 && opts.replace;
+    if (replaced) await deleteExistingArtifacts(priorResults, existingFileIds, id);
     return {
       state: replaced ? 'replaced' : 'uploaded',
       detail: `${replaced ? 'Replaced existing file' : 'File uploaded'} (checksum ${checksum.slice(0, 12)}…). No result created.`,
@@ -2383,9 +2498,9 @@ async function importOneFile(q, opts) {
     };
   }
 
-  const existingResults = await findResultsByChecksum(checksum);
+  const existingResults = await findResultsByChecksum(checksum, workspaceId);
   const fileIdsFromResults = [...new Set(existingResults.flatMap((r) => r.fileIds || []))];
-  const orphanFiles = await findFilesByChecksum(checksum);
+  const orphanFiles = await findFilesByChecksum(checksum, workspaceId);
   const existingFileIds = [...new Set([...fileIdsFromResults, ...orphanFiles])];
   const hasResult = existingResults.length > 0;
   const hasExisting = hasResult || existingFileIds.length > 0;
@@ -2395,24 +2510,13 @@ async function importOneFile(q, opts) {
     return { state: 'skipped', detail: `Skipped — a result with this checksum already exists (${existingResults.length} result(s), ${existingFileIds.length} file(s)). Enable "Replace existing files/results?" to overwrite.` };
   }
 
-  let replaced = false;
-  if (hasExisting && opts.replace) {
-    if (existingResults.length) await tmDeleteResults(existingResults.map((r) => r.id));
-    // Never delete the file currently being viewed — it is the import source.
-    const idsToDelete = existingFileIds.filter((id) => id !== q.serviceFileId);
-    if (idsToDelete.length) await deleteFiles(idsToDelete);
-    replaced = true;
-  }
-
-  const doc = new DOMParser().parseFromString(text, 'application/xml');
-  if (doc.querySelector('parsererror')) throw new Error('File is not valid XML.');
-  if (!isAtml(doc)) throw new Error('File is not recognized as ATML.');
-
   // Service file: reuse its existing id (no upload). Otherwise reuse a
   // previously-uploaded copy with the same checksum, or upload the file now.
-  const resultWsId = isServiceFile ? (q.workspace || opts.workspaceId) : opts.workspaceId;
-  const reusedFileId = (!isServiceFile && !replaced && !hasResult && existingFileIds.length) ? existingFileIds[0] : null;
+  const replacing = hasExisting && opts.replace;
+  const resultWsId = workspaceId;
+  const reusedFileId = (!isServiceFile && !replacing && !hasResult && existingFileIds.length) ? existingFileIds[0] : null;
   const fileId = isServiceFile ? q.serviceFileId : (reusedFileId || await uploadFileToService(q.file, opts.workspaceId));
+  const createdFile = !isServiceFile && !reusedFileId;
   const linkFileIds = (isServiceFile || !reusedFileId) ? [fileId] : existingFileIds;
 
   const { resultRequest, buildSteps } = buildResultAndSteps(doc, { checksum, workspaceId: resultWsId, fileId });
@@ -2427,9 +2531,20 @@ async function importOneFile(q, opts) {
   }
   // Mark integrity Complete only after every step batch has been uploaded, so
   // an interrupted transfer leaves the result flagged "Incomplete".
-  await tmUpdateResultProperties(resultId, { 'ATML Integrity': 'Complete' });
-  for (const fid of linkFileIds) {
-    await updateFileMetadata(fid, { 'ATML Checksum': checksum, testResultId: resultId }).catch((e) => console.warn('[import] link testResultId failed for file', fid, e));
+  try {
+    await tmUpdateResultProperties(resultId, { 'ATML Integrity': 'Complete' });
+    for (const fid of linkFileIds) {
+      await updateFileMetadata(fid, { 'ATML Checksum': checksum, testResultId: resultId });
+    }
+  } catch (e) {
+    await cleanupCreatedResult(resultId, fileId, createdFile);
+    throw new Error(`Test result was created but could not be finalized: ${e.message}`);
+  }
+
+  let replaced = false;
+  if (replacing) {
+    await deleteExistingArtifacts(existingResults, existingFileIds, fileId);
+    replaced = true;
   }
 
   let state, detail;
@@ -2583,6 +2698,7 @@ function init() {
 
   $('#nav-search').addEventListener('click', showSearchPage);
   $('#back-to-files').addEventListener('click', showSearchPage);
+  $('#delete-btn').addEventListener('click', deleteCurrentFile);
 
   const fileTable = $('#file-table');
   // Clicking a row selects it (native Nimble highlight). Only the file-name
