@@ -1012,18 +1012,18 @@ function extractResults(node) {
 // Parse <c:IndexedArray> (TestStand waveform / multi-point arrays) into a
 // dimensions descriptor plus a flat list of positioned values.
 function parseIndexedArray(arrEl) {
-  const allPoints = childrenByLocal(arrEl, 'Element').map((e) => ({
+  const elements = childrenByLocal(arrEl, 'Element');
+  const points = elements.slice(0, MAX_ARRAY_CELLS).map((e) => ({
     pos: ((attr(e, 'position') || '').match(/-?\d+/g) || []).map(Number),
     value: attr(e, 'value') != null ? attr(e, 'value') : textOf(e),
   }));
   const parsed = parseArrayDimensions(attr(arrEl, 'dimensions'));
-  const points = allPoints.slice(0, MAX_ARRAY_CELLS);
   return {
     dims: parsed.declared.length ? (parsed.valid ? parsed.declared : []) : [points.length],
     declaredDims: parsed.declared,
     dimensionsValid: parsed.valid,
     points,
-    truncated: allPoints.length > points.length,
+    truncated: elements.length > points.length,
   };
 }
 
