@@ -212,26 +212,33 @@ function applyAndRender() {
 // Global ATML/XML search/browse via Elasticsearch (all workspaces), newest
 // first. ATML reports may use either an .xml or .atml extension.
 async function elasticXmlSearch(text) {
-  const TAKE = 1000;
+  const TAKE = SERVER_PAGE;
   const clauses = ['(extension: "xml" OR extension: "atml")'];
   if (text) {
     const safe = text.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     clauses.push(`name: "*${safe}*"`);
   }
-  const body = { filter: clauses.join(' AND '), orderBy: 'created', orderByDescending: true, take: TAKE };
-  const res = await apiGet(`${FILE_API}/service-groups/Default/search-files`, {
-    method: 'POST',
-    headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
-  const files = data.availableFiles || data.files || data.value || [];
-  // More files exist than we're showing when the server reports a continuation
-  // token, a higher total count, or simply fills the requested page.
-  const total = typeof data.totalCount === 'number' ? data.totalCount : null;
-  const truncated = !!data.continuationToken
-    || (total != null && total > files.length)
-    || files.length >= TAKE;
+  const files = [];
+  const range = getActiveTimeRange();
+  let skip = 0;
+  let total = null;
+  let truncated = false;
+  while (total === null || skip < total) {
+    const res = await apiGet(`${FILE_API}/service-groups/Default/search-files`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filter: clauses.join(' AND '), orderBy: 'created', orderByDescending: true, take: TAKE, skip }),
+    });
+    const data = await res.json();
+    const page = data.availableFiles || data.files || data.value || [];
+    files.push(...page);
+    total = typeof data.totalCount === 'number' ? data.totalCount : skip + page.length;
+    if (!page.length) break;
+    skip += page.length;
+    const lastCreated = Date.parse(page[page.length - 1].created || page[page.length - 1].updated);
+    if (range && !Number.isNaN(lastCreated) && lastCreated < range.start.getTime()) break;
+    if (skip >= 5000 && skip < total) { truncated = true; break; }
+  }
   return { files, truncated };
 }
 
@@ -414,9 +421,6 @@ function openXml(text, name, id, file) {
   state.rawViewRenderedFor = null;
   $('#raw-code').textContent = '';
 
-  // Raw view
-  $('#raw-code').innerHTML = highlightXml(text);
-
   const body = $('#viewer-body');
   body.innerHTML = '';
 
@@ -455,6 +459,11 @@ function setFormatBadge(label, isAtml) {
 
 function showViewerError(name, msg) {
   state.currentFile = null;
+  state.currentDoc = null;
+  state.currentRawText = '';
+  state.rawViewRenderedFor = null;
+  $('#raw-code').textContent = '';
+  $('#download-btn').onclick = null;
   updateDeleteButton();
   showViewerPage();
   $('#viewer').hidden = false;
@@ -1369,7 +1378,7 @@ function buildArrayTable(array) {
   const table = el('table', { class: 'array-table' });
   const thead = el('thead');
   const tbody = el('tbody');
-  if (array.dimensionsValid !== false && dims.length >= 2) {
+  if (array.dimensionsValid !== false && dims.length === 2) {
     const rows = Math.min(dims[0], MAX_ARRAY_CELLS);
     const cols = Math.min(dims[1], MAX_ARRAY_CELLS);
     const grid = Array.from({ length: rows }, () => new Array(cols).fill(''));
@@ -1388,10 +1397,10 @@ function buildArrayTable(array) {
       tbody.appendChild(tr);
     }
   } else {
-    thead.innerHTML = '<tr><th>#</th><th>Value</th></tr>';
+    thead.innerHTML = '<tr><th>Coordinates</th><th>Value</th></tr>';
     points.slice(0, MAX_ARRAY_CELLS).forEach((p, i) => {
       const tr = el('tr');
-      tr.appendChild(el('td', { class: 'array-idx', text: String(p.pos.length ? p.pos[0] : i) }));
+      tr.appendChild(el('td', { class: 'array-idx', text: p.pos.length ? `[${p.pos.join(', ')}]` : String(i) }));
       tr.appendChild(el('td', { class: 'num', text: p.value }));
       tbody.appendChild(tr);
     });
@@ -1406,7 +1415,7 @@ function arrayToCsv(array) {
   const dims = array.dims || [];
   const points = array.points || [];
   const rows = [];
-  if (array.dimensionsValid !== false && dims.length >= 2) {
+  if (array.dimensionsValid !== false && dims.length === 2) {
     const nRows = Math.min(dims[0], MAX_ARRAY_CELLS);
     const nCols = Math.min(dims[1], MAX_ARRAY_CELLS);
     const grid = Array.from({ length: nRows }, () => new Array(nCols).fill(''));
@@ -1417,8 +1426,8 @@ function arrayToCsv(array) {
     rows.push(['#', ...Array.from({ length: nCols }, (_, c) => `Column ${c}`)]);
     for (let r = 0; r < nRows; r++) rows.push([r, ...grid[r]]);
   } else {
-    rows.push(['#', 'Value']);
-    points.slice(0, MAX_ARRAY_CELLS).forEach((p, i) => rows.push([p.pos.length ? p.pos[0] : i, p.value]));
+    rows.push(['Coordinates', 'Value']);
+    points.slice(0, MAX_ARRAY_CELLS).forEach((p, i) => rows.push([p.pos.length ? `[${p.pos.join(', ')}]` : i, p.value]));
   }
   return rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
 }
@@ -1610,6 +1619,7 @@ function formatSeconds(s) {
 }
 
 /* ---------- Generic XML tree ---------- */
+let xmlElementId = 0;
 function renderGenericXml(doc, container) {
   const tree = el('div', { class: 'xml-tree' });
   // Render any leading processing instructions / comments at document level.
@@ -1636,7 +1646,10 @@ function renderXmlElement(node, depth) {
   const empty = childElements.length === 0;
 
   const line = el('div', { class: 'xml-line' });
-  const toggle = el('span', { class: 'xml-toggle' + (hasElementChildren ? '' : ' placeholder'), text: hasElementChildren ? '▾' : '' });
+  const childrenId = hasElementChildren ? `xml-children-${++xmlElementId}` : null;
+  const toggle = hasElementChildren
+    ? el('button', { class: 'xml-toggle', text: '▾', attrs: { type: 'button', 'aria-expanded': 'true', 'aria-controls': childrenId, 'aria-label': `Collapse ${node.nodeName}` } })
+    : el('span', { class: 'xml-toggle placeholder' });
   line.appendChild(toggle);
 
   const content = el('span', { class: 'xml-content' });
@@ -1664,6 +1677,7 @@ function renderXmlElement(node, depth) {
 
   if (!empty && !onlyText) {
     const children = el('div', { class: 'xml-children' });
+    if (childrenId) children.id = childrenId;
     for (const c of childElements) {
       if (c.nodeType === Node.ELEMENT_NODE) {
         children.appendChild(renderXmlElement(c, depth + 1));
@@ -1683,6 +1697,8 @@ function renderXmlElement(node, depth) {
       const doToggle = () => {
         const collapsed = wrap.classList.toggle('collapsed');
         toggle.textContent = collapsed ? '▸' : '▾';
+        toggle.setAttribute('aria-expanded', String(!collapsed));
+        toggle.setAttribute('aria-label', `${collapsed ? 'Expand' : 'Collapse'} ${node.nodeName}`);
         closeLine.style.display = collapsed ? 'none' : '';
       };
       toggle.addEventListener('click', doToggle);
@@ -2402,10 +2418,28 @@ function resourceWorkspaceId(resource) {
 }
 async function findResultsByChecksum(checksum, workspaceId) {
   if (!workspaceId) return [];
-  const data = await tmPost('query-results', {
-    filter: 'properties["ATML Checksum"] == @0', substitutions: [checksum], take: 100, returnCount: true,
-  });
-  return (data.results || []).filter((result) => resourceWorkspaceId(result) === workspaceId);
+  const results = [];
+  let skip = 0;
+  let continuationToken = null;
+  let total = null;
+  do {
+    const body = {
+      filter: 'workspace == @1 AND properties["ATML Checksum"] == @0',
+      substitutions: [checksum, workspaceId],
+      take: 100,
+      skip,
+      returnCount: true,
+    };
+    if (continuationToken) body.continuationToken = continuationToken;
+    const data = await tmPost('query-results', body);
+    const page = data.results || [];
+    results.push(...page.filter((result) => resourceWorkspaceId(result) === workspaceId));
+    skip += page.length;
+    total = typeof data.totalCount === 'number' ? data.totalCount : null;
+    continuationToken = data.continuationToken || null;
+    if (!page.length || (!continuationToken && total != null && skip >= total)) break;
+  } while (continuationToken || total == null || skip < total);
+  return results;
 }
 async function tmDeleteResults(ids) {
   if (!ids.length) return;
@@ -2418,34 +2452,30 @@ async function tmUpdateResultProperties(resultId, properties) {
     replace: false,
   });
 }
-// Locate files tagged with a given ATML Checksum via the Elasticsearch-backed
-// search-files endpoint (more performant than paging query-files). Returns the
-// list of matching file ids. The property key has a space, so the field name is
-// escaped Lucene-style; the original quoted form is kept as a fallback.
+// Locate files tagged with a given ATML Checksum in one workspace. Paging the
+// workspace query avoids both cross-workspace matches and search result caps.
 async function findFilesByChecksum(checksum, workspaceId) {
   if (!workspaceId) return [];
-  const safe = String(checksum).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
-  const filters = [
-    `properties.ATML\\ Checksum:"${safe}"`,
-    `"properties.ATML Checksum":("${safe}")`,
-  ];
-  for (const filter of filters) {
-    try {
-      const res = await apiGet(`${FILE_API}/service-groups/Default/search-files`, {
-        method: 'POST',
-        headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filter, orderBy: 'updated', orderByDescending: true, take: 1000 }),
-      });
-      const data = await res.json();
-      const files = data.availableFiles || data.files || data.value || [];
-      const ids = files
-        .filter((file) => resourceWorkspaceId(file) === workspaceId)
-        .map((f) => f.id)
-        .filter(Boolean);
-      if (ids.length) return ids;
-    } catch { /* try the next filter form */ }
+  const matches = [];
+  let skip = 0;
+  let total = null;
+  while (total === null || skip < total) {
+    const res = await apiGet(`${FILE_API}/service-groups/Default/query-files?workspace=${encodeURIComponent(workspaceId)}`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
+      body: JSON.stringify({ take: SERVER_PAGE, skip, orderBy: 'updated', orderByDescending: true }),
+    });
+    const data = await res.json();
+    const page = data.availableFiles || data.files || data.value || [];
+    for (const file of page) {
+      const properties = file.properties || {};
+      if (properties['ATML Checksum'] === checksum) matches.push(file);
+    }
+    total = data.totalCount != null ? data.totalCount : skip + page.length;
+    if (!page.length) break;
+    skip += page.length;
   }
-  return [];
+  return matches;
 }
 async function deleteFiles(ids) {
   if (!ids.length) return;
@@ -2465,9 +2495,26 @@ async function deleteExistingArtifacts(results, fileIds, sourceFileId) {
   const idsToDelete = fileIds.filter((id) => id !== sourceFileId);
   if (idsToDelete.length) await deleteFiles(idsToDelete);
 }
+function assertReplacementPermissions(results, fileIds, sourceFileId, workspaceId) {
+  if (results.length && !can(PERM.deleteResult, workspaceId)) {
+    throw new Error('You do not have permission to replace existing test results in this workspace.');
+  }
+  if (fileIds.some((id) => id !== sourceFileId) && !can(PERM.deleteFile, workspaceId)) {
+    throw new Error('You do not have permission to replace existing files in this workspace.');
+  }
+}
 async function cleanupCreatedResult(resultId, fileId, deleteFile) {
   await tmDeleteResults([resultId]).catch((error) => console.warn('[import] cleanup result failed', error));
   if (deleteFile) await deleteFiles([fileId]).catch((error) => console.warn('[import] cleanup file failed', error));
+}
+async function rollbackFileMetadata(updates) {
+  for (const update of updates) {
+    const previous = update.previous || {};
+    const properties = Object.prototype.hasOwnProperty.call(previous, 'testResultId')
+      ? { testResultId: previous.testResultId }
+      : { testResultId: null };
+    await updateFileMetadata(update.id, properties).catch((error) => console.warn('[import] metadata rollback failed', error));
+  }
 }
 
 function toIso(dt) {
@@ -2592,6 +2639,21 @@ function buildResultAndSteps(doc, opts) {
   return { resultRequest, buildSteps };
 }
 
+const importLocks = new Map();
+async function withImportLock(key, operation) {
+  const previous = importLocks.get(key) || Promise.resolve();
+  let release;
+  const current = new Promise((resolve) => { release = resolve; });
+  importLocks.set(key, current);
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (importLocks.get(key) === current) importLocks.delete(key);
+  }
+}
+
 // Import a single queued file. Returns { state, detail, fileId, resultId }.
 async function importOneFile(q, opts) {
   const isServiceFile = !!q.serviceFileId;
@@ -2600,6 +2662,11 @@ async function importOneFile(q, opts) {
   const text = q.text != null ? q.text : await q.file.text();
   const checksum = await sha256Hex(text);
   q.checksum = checksum;
+  return withImportLock(`${workspaceId}:${checksum}`, () => importOneFileLocked(q, opts, workspaceId, text, checksum));
+}
+
+async function importOneFileLocked(q, opts, workspaceId, text, checksum) {
+  const isServiceFile = !!q.serviceFileId;
 
   if (isServiceFile && !opts.createResults) {
     return { state: 'skipped', detail: 'Skipped — Create result data is disabled for an existing File Service file.' };
@@ -2619,7 +2686,8 @@ async function importOneFile(q, opts) {
     const priorResults = await findResultsByChecksum(checksum, workspaceId);
     const fileIdsFromResults = [...new Set(priorResults.flatMap((r) => r.fileIds || []))];
     const orphanFiles = await findFilesByChecksum(checksum, workspaceId);
-    const existingFileIds = [...new Set([...fileIdsFromResults, ...orphanFiles])];
+    const orphanFileIds = orphanFiles.map((file) => file.id).filter(Boolean);
+    const existingFileIds = [...new Set([...fileIdsFromResults, ...orphanFileIds])];
 
     if (existingFileIds.length && !opts.replace) {
       return { state: 'skipped', detail: `Skipped — a file with this checksum already exists (${existingFileIds.length} file(s)). Enable "Replace existing files/results?" to overwrite.` };
@@ -2643,7 +2711,8 @@ async function importOneFile(q, opts) {
   const existingResults = await findResultsByChecksum(checksum, workspaceId);
   const fileIdsFromResults = [...new Set(existingResults.flatMap((r) => r.fileIds || []))];
   const orphanFiles = await findFilesByChecksum(checksum, workspaceId);
-  const existingFileIds = [...new Set([...fileIdsFromResults, ...orphanFiles])];
+  const orphanFileIds = orphanFiles.map((file) => file.id).filter(Boolean);
+  const existingFileIds = [...new Set([...fileIdsFromResults, ...orphanFileIds])];
   const hasResult = existingResults.length > 0;
   const hasExisting = hasResult || existingFileIds.length > 0;
 
@@ -2655,6 +2724,7 @@ async function importOneFile(q, opts) {
   // Service file: reuse its existing id (no upload). Otherwise reuse a
   // previously-uploaded copy with the same checksum, or upload the file now.
   const replacing = hasExisting && opts.replace;
+  if (replacing) assertReplacementPermissions(existingResults, existingFileIds, isServiceFile ? q.serviceFileId : null, workspaceId);
   const resultWsId = workspaceId;
   const reusedFileId = (!isServiceFile && !replacing && !hasResult && existingFileIds.length) ? existingFileIds[0] : null;
   const fileId = isServiceFile ? q.serviceFileId : (reusedFileId || await uploadFileToService(q.file, opts.workspaceId));
@@ -2665,6 +2735,9 @@ async function importOneFile(q, opts) {
   resultRequest.fileIds = linkFileIds;
   let resultId = null;
   let steps = [];
+  const previousFileMetadata = new Map(orphanFiles.map((file) => [file.id, file.properties || {}]));
+  if (state.currentFile && state.currentFile.id) previousFileMetadata.set(state.currentFile.id, state.currentFile.properties || {});
+  const updatedMetadata = [];
   try {
     resultId = await tmCreateResult(resultRequest);
     steps = buildSteps(resultId);
@@ -2679,8 +2752,10 @@ async function importOneFile(q, opts) {
     await tmUpdateResultProperties(resultId, { 'ATML Integrity': 'Complete' });
     for (const fid of linkFileIds) {
       await updateFileMetadata(fid, { 'ATML Checksum': checksum, testResultId: resultId });
+      updatedMetadata.push({ id: fid, previous: previousFileMetadata.get(fid) });
     }
   } catch (e) {
+    await rollbackFileMetadata(updatedMetadata);
     if (resultId) await cleanupCreatedResult(resultId, fileId, createdFile);
     else if (createdFile) await deleteFiles([fileId]).catch((cleanupError) => console.warn('[import] cleanup file after result creation failure failed', cleanupError));
     throw new Error(`ATML import failed: ${e.message}`);
@@ -2692,21 +2767,21 @@ async function importOneFile(q, opts) {
     replaced = true;
   }
 
-  let state, detail;
+  let resultState, detail;
   if (replaced) {
-    state = 'replaced';
+    resultState = 'replaced';
     detail = `Replaced existing file/result. Created result ${resultId} with ${steps.length} step(s).`;
   } else if (isServiceFile) {
-    state = 'created';
+    resultState = 'created';
     detail = `Created result ${resultId} with ${steps.length} step(s) from the viewed file.`;
   } else if (reusedFileId) {
-    state = 'created';
+    resultState = 'created';
     detail = `File was already uploaded — created result ${resultId} with ${steps.length} step(s) and linked it to the existing file.`;
   } else {
-    state = 'created';
+    resultState = 'created';
     detail = `Created result ${resultId} with ${steps.length} step(s).`;
   }
-  return { state, detail, fileId, resultId };
+  return { state: resultState, detail, fileId, resultId };
 }
 
 async function runUpload() {
