@@ -766,9 +766,9 @@ function renderAtml(doc, container) {
   noRes.hidden = true;
   tableWrap.appendChild(noRes);
   const pager = el('div', { class: 'steps-pager' });
-  const previousPage = el('button', { class: 'steps-page-btn', attrs: { type: 'button' }, text: 'Previous' });
+  const previousPage = el('nimble-button', { class: 'steps-page-btn', attrs: { type: 'button', appearance: 'ghost' }, text: 'Previous' });
   const pageLabel = el('span', { class: 'steps-page-label' });
-  const nextPage = el('button', { class: 'steps-page-btn', attrs: { type: 'button' }, text: 'Next' });
+  const nextPage = el('nimble-button', { class: 'steps-page-btn', attrs: { type: 'button', appearance: 'ghost' }, text: 'Next' });
   pager.append(previousPage, pageLabel, nextPage);
   tableWrap.appendChild(pager);
   container.appendChild(tableWrap);
