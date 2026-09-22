@@ -1440,7 +1440,8 @@ function arrayToCsv(array) {
 }
 function csvCell(v) {
   const s = v == null ? '' : String(v);
-  return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  const safe = /^[\t\r\n ]*[-+=@]/.test(s) ? `'${s}` : s;
+  return /[",\r\n]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 function sanitizeFileName(name) {
   return String(name).replace(/[^a-z0-9._-]+/gi, '_').replace(/^_+|_+$/g, '') || 'array-data';
