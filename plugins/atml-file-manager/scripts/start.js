@@ -31,7 +31,14 @@ const server = http.createServer((request, response) => {
     return;
   }
 
-  const relativePath = decodeURIComponent(requestUrl.pathname === '/' ? '/index.html' : requestUrl.pathname);
+  let relativePath;
+  try {
+    relativePath = decodeURIComponent(requestUrl.pathname === '/' ? '/index.html' : requestUrl.pathname);
+  } catch {
+    response.writeHead(400);
+    response.end('Bad request');
+    return;
+  }
   const filePath = path.resolve(root, `.${relativePath}`);
   if (!filePath.startsWith(`${root}${path.sep}`)) {
     response.writeHead(403);

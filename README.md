@@ -15,6 +15,10 @@ It is set up to:
 .
 ├── .github/workflows/publish-to-plugin-manager.yml
 ├── plugins/
+│   ├── atml-file-manager/
+│   │   ├── nipkg.config.json
+│   │   ├── package.json
+│   │   └── webapp/
 │   ├── ni-labs-asset-calibration-alarms-notification/
 │   │   ├── notebook/
 │   │   ├── nipkg.config.json
@@ -31,9 +35,6 @@ It is set up to:
 │       ├── app/
 │       ├── nipkg.config.json
 │       └── package.json
-├── docs/
-│   ├── nigel-pane-splitter-pattern.md
-│   └── toolbar-pattern.md
 └── scripts/
     ├── build-plugin-package.mjs
     ├── build-plugin-payload.mjs

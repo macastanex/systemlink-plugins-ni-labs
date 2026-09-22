@@ -130,18 +130,18 @@
 
   <!-- Step details slide-out -->
   <div id="drawer-backdrop" class="drawer-backdrop"></div>
-  <aside id="step-drawer" class="step-drawer" aria-label="Step details">
+  <aside id="step-drawer" class="step-drawer" aria-label="Step details" aria-hidden="true" inert>
     <header class="drawer-header">
       <h2>Step Details</h2>
       <div id="drawer-step-name" class="drawer-subtitle"></div>
     </header>
-    <div class="drawer-tabs" role="tablist">
-      <button id="dtab-info" class="drawer-tab active" type="button">Info</button>
-      <button id="dtab-data" class="drawer-tab" type="button">Data</button>
+    <div class="drawer-tabs" role="tablist" aria-label="Step detail views">
+      <button id="dtab-info" class="drawer-tab active" type="button" role="tab" aria-selected="true" aria-controls="drawer-info">Info</button>
+      <button id="dtab-data" class="drawer-tab" type="button" role="tab" aria-selected="false" aria-controls="drawer-data" tabindex="-1">Data</button>
     </div>
     <div class="drawer-body">
-      <div id="drawer-info"></div>
-      <div id="drawer-data" hidden></div>
+      <div id="drawer-info" role="tabpanel" aria-labelledby="dtab-info" tabindex="0"></div>
+      <div id="drawer-data" role="tabpanel" aria-labelledby="dtab-data" tabindex="0" hidden></div>
     </div>
     <footer class="drawer-footer">
       <nimble-button id="drawer-close" appearance="ghost">Close</nimble-button>
@@ -150,7 +150,7 @@
 
   <!-- Import ATML data slide-out -->
   <div id="upload-backdrop" class="drawer-backdrop"></div>
-  <aside id="upload-drawer" class="upload-drawer" aria-label="Import ATML data">
+  <aside id="upload-drawer" class="upload-drawer" aria-label="Import ATML data" aria-hidden="true" inert>
     <header class="drawer-header">
       <h2>Import ATML data</h2>
     </header>

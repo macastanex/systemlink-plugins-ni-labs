@@ -38,6 +38,12 @@ const state = {
   currentFormat: 'xml', // 'atml' | 'xml'
   currentFilterMode: 'all',
   authStatements: null, // flattened policy statements from /niauth/v1/auth (null until loaded)
+  loadPending: false,
+  loadRequestId: 0,
+  fileRequestId: 0,
+  rawViewRenderedFor: null,
+  stepDrawerReturnFocus: null,
+  uploadDrawerReturnFocus: null,
 };
 
 /* ---------- DOM helpers ---------- */
@@ -57,17 +63,19 @@ const el = (tag, opts = {}) => {
 // gateway errors (upstream slow/restarting) and are retried too.
 const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
 async function fetchWithRetry(url, opts = {}, { retries = 6, baseDelay = 500 } = {}) {
+  const method = (opts.method || 'GET').toUpperCase();
+  const retryable = method === 'GET' || method === 'HEAD' || method === 'OPTIONS';
   for (let attempt = 0; ; attempt++) {
     let res;
     try {
       const demoFetch = window.__ATML_DEMO_API__ && window.__ATML_DEMO_API__.fetch;
       res = await (demoFetch ? demoFetch(url, opts) : fetch(url, opts));
     } catch (netErr) {
-      if (attempt >= retries) throw netErr;
+      if (!retryable || attempt >= retries) throw netErr;
       await sleep(baseDelay * 2 ** attempt + Math.random() * 250);
       continue;
     }
-    if (!RETRYABLE_STATUS.has(res.status) || attempt >= retries) return res;
+    if (!retryable || !RETRYABLE_STATUS.has(res.status) || attempt >= retries) return res;
     const retryAfter = Number(res.headers.get('Retry-After'));
     const wait = Number.isFinite(retryAfter) && retryAfter > 0
       ? retryAfter * 1000
@@ -150,7 +158,11 @@ function fileExt(f) {
  *    `extension: "xml"` filter (plus a name wildcard when searching).
  */
 async function loadFiles() {
-  if (state.loading) return;
+  const requestId = ++state.loadRequestId;
+  if (state.loading) {
+    state.loadPending = true;
+    return;
+  }
   state.loading = true;
   setFileStatus(state.search ? 'Searching…' : 'Loading files…');
   try {
@@ -167,13 +179,19 @@ async function loadFiles() {
       files = r.files;
       truncated = r.truncated;
     }
-    state.allFiles = files;
-    state.serverTruncated = truncated;
-    applyAndRender();
+    if (requestId === state.loadRequestId) {
+      state.allFiles = files;
+      state.serverTruncated = truncated;
+      applyAndRender();
+    }
   } catch (e) {
-    setFileStatus(e.message, true);
+    if (requestId === state.loadRequestId) setFileStatus(e.message, true);
   } finally {
     state.loading = false;
+    if (state.loadPending) {
+      state.loadPending = false;
+      loadFiles();
+    }
   }
 }
 
@@ -331,6 +349,7 @@ function formatDate(iso) {
 /* ---------- Load & render a file ---------- */
 async function selectFile(f) {
   if (state.openingId === f.id) return;
+  const requestId = ++state.fileRequestId;
   state.openingId = f.id;
   state.selectedId = f.id;
   showViewerPage();
@@ -340,12 +359,14 @@ async function selectFile(f) {
       headers: {},
     });
     const text = await res.text();
-    openXml(text, fileName(f), f.id, f);
+    if (requestId === state.fileRequestId) openXml(text, fileName(f), f.id, f);
   } catch (e) {
-    showViewerError(fileName(f), e.message);
+    if (requestId === state.fileRequestId) showViewerError(fileName(f), e.message);
   } finally {
-    showLoading(false);
-    state.openingId = null;
+    if (requestId === state.fileRequestId) {
+      showLoading(false);
+      state.openingId = null;
+    }
   }
 }
 
@@ -390,6 +411,8 @@ function openXml(text, name, id, file) {
   const doc = parser.parseFromString(text, 'application/xml');
   const parseError = doc.querySelector('parsererror');
   state.currentDoc = doc;
+  state.rawViewRenderedFor = null;
+  $('#raw-code').textContent = '';
 
   // Raw view
   $('#raw-code').innerHTML = highlightXml(text);
@@ -546,6 +569,14 @@ function resultSetsFor(doc) {
   if (testResults.length) return testResults.flatMap((results) => allByLocal(results, 'ResultSet'));
   return allByLocal(root, 'ResultSet');
 }
+function resultSetValue(resultSets, containerLocal, valueLocal) {
+  for (const resultSet of resultSets) {
+    const container = firstByLocal(resultSet, containerLocal);
+    const value = container && firstByLocal(container, valueLocal);
+    if (value) return textOf(value);
+  }
+  return '';
+}
 function attr(node, name) {
   if (!node) return null;
   // try direct, then namespace-agnostic
@@ -571,8 +602,8 @@ function renderAtml(doc, container) {
 
   // ----- summary -----
   const operator = attr(firstByLocal(results, 'SystemOperator'), 'name');
-  const uut = textOf(firstByLocal(firstChildByLocal(results, 'UUT') || results, 'SerialNumber'));
-  const station = textOf(firstByLocal(firstChildByLocal(results, 'TestStation') || results, 'SerialNumber'));
+  const uut = resultSetValue(resultSets, 'UUT', 'SerialNumber');
+  const station = resultSetValue(resultSets, 'TestStation', 'SerialNumber');
   const overall = aggregateOutcome(resultSets.map(outcomeOf));
   const start = earliestDate(resultSets.map((rs) => attr(rs, 'startDateTime')));
   const end = latestDate(resultSets.map((rs) => attr(rs, 'endDateTime')));
@@ -713,17 +744,17 @@ function renderAtml(doc, container) {
   thead.appendChild(htr);
   table.appendChild(thead);
   const tbody = el('tbody');
-  const rowEls = [];
-  for (const row of rows) {
-    const tr = renderStepsRow(row, row.expandable ? () => toggle(row.id) : null);
-    tbody.appendChild(tr);
-    rowEls.push({ row, tr });
-  }
   table.appendChild(tbody);
   tableWrap.appendChild(table);
   const noRes = el('div', { class: 'no-results', text: 'No steps match your filter.' });
   noRes.hidden = true;
   tableWrap.appendChild(noRes);
+  const pager = el('div', { class: 'steps-pager' });
+  const previousPage = el('button', { class: 'steps-page-btn', attrs: { type: 'button' }, text: 'Previous' });
+  const pageLabel = el('span', { class: 'steps-page-label' });
+  const nextPage = el('button', { class: 'steps-page-btn', attrs: { type: 'button' }, text: 'Next' });
+  pager.append(previousPage, pageLabel, nextPage);
+  tableWrap.appendChild(pager);
   container.appendChild(tableWrap);
   setupResizableColumns(table);
 
@@ -734,27 +765,49 @@ function renderAtml(doc, container) {
     while (p != null) { if (collapsed.has(p)) return false; p = parentOf.get(p); }
     return true;
   }
+  const STEP_PAGE_SIZE = 200;
+  let visibleRows = [];
+  let currentPage = 0;
+  function renderPage() {
+    tbody.replaceChildren();
+    const pageCount = Math.max(1, Math.ceil(visibleRows.length / STEP_PAGE_SIZE));
+    currentPage = Math.min(currentPage, pageCount - 1);
+    const start = currentPage * STEP_PAGE_SIZE;
+    const pageRows = visibleRows.slice(start, start + STEP_PAGE_SIZE);
+    for (const row of pageRows) {
+      tbody.appendChild(renderStepsRow(row, row.expandable ? () => toggle(row.id) : null, collapsed.has(row.id)));
+    }
+    noRes.hidden = visibleRows.length > 0;
+    previousPage.disabled = currentPage === 0 || visibleRows.length === 0;
+    nextPage.disabled = currentPage >= pageCount - 1 || visibleRows.length === 0;
+    pageLabel.textContent = visibleRows.length
+      ? `Showing ${start + 1}-${Math.min(start + STEP_PAGE_SIZE, visibleRows.length)} of ${visibleRows.length}`
+      : 'No steps';
+  }
+  previousPage.addEventListener('click', () => { currentPage--; renderPage(); });
+  nextPage.addEventListener('click', () => { currentPage++; renderPage(); });
+
   function recompute() {
     const q = (searchInput.value || '').trim().toLowerCase();
     const mode = state.currentFilterMode;
     const filtering = q !== '' || mode !== 'all';
     const selfMatch = new Map();
-    for (const { row } of rowEls) {
+    for (const row of rows) {
       if (row.kind !== 'step') continue;
-      const outOk = mode === 'all' || (row.outcome || '').toLowerCase() === mode;
+      const outOk = mode === 'all' || resolveOutcome(row.outcome, row.node && row.node.outcomeQualifier) === mode;
       const qOk = !q || row.searchText.includes(q);
       selfMatch.set(row.id, outOk && qOk);
     }
     const subtree = new Map();
-    for (let i = rowEls.length - 1; i >= 0; i--) {
-      const row = rowEls[i].row;
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const row = rows[i];
       if (row.kind !== 'step') continue;
       let m = selfMatch.get(row.id) === true;
       for (const c of (childSteps.get(row.id) || [])) if (subtree.get(c)) m = true;
       subtree.set(row.id, m);
     }
-    let anyVisible = false;
-    for (const { row, tr } of rowEls) {
+    visibleRows = [];
+    for (const row of rows) {
       let show;
       if (row.kind === 'step') {
         show = subtree.get(row.id) === true;
@@ -762,11 +815,10 @@ function renderAtml(doc, container) {
         show = subtree.get(row.parent) === true && (!filtering || selfMatch.get(row.parent) === true);
       }
       if (show && !filtering && !ancestorsExpanded(row)) show = false;
-      if (row.kind === 'step') tr.classList.toggle('is-collapsed', collapsed.has(row.id) && !filtering);
-      tr.hidden = !show;
-      if (show) anyVisible = true;
+      if (show) visibleRows.push(row);
     }
-    noRes.hidden = anyVisible;
+    currentPage = 0;
+    renderPage();
   }
 
   const updateSearchClear = () => { searchClear.style.display = searchInput.value ? '' : 'none'; };
@@ -869,10 +921,11 @@ function buildNode(child) {
 
 function outcomeOf(node) {
   const o = firstChildByLocal(node, 'Outcome') || firstChildByLocal(node, 'ActionOutcome');
-  return o ? attr(o, 'value') : null;
+  return o ? resolveOutcome(attr(o, 'value'), attr(o, 'qualifier')) : null;
 }
 function stepType(node) {
-  const st = firstByLocal(node, 'StepType');
+  const extension = firstChildByLocal(node, 'Extension');
+  const st = firstChildByLocal(node, 'StepType') || (extension && firstChildByLocal(extension, 'StepType'));
   return st ? textOf(st) : null;
 }
 function stepTime(node) {
@@ -943,12 +996,40 @@ function extractResults(node) {
 // Parse <c:IndexedArray> (TestStand waveform / multi-point arrays) into a
 // dimensions descriptor plus a flat list of positioned values.
 function parseIndexedArray(arrEl) {
-  const dimsMatch = (attr(arrEl, 'dimensions') || '').match(/\d+/g);
-  const points = childrenByLocal(arrEl, 'Element').map((e) => ({
+  const allPoints = childrenByLocal(arrEl, 'Element').map((e) => ({
     pos: ((attr(e, 'position') || '').match(/-?\d+/g) || []).map(Number),
     value: attr(e, 'value') != null ? attr(e, 'value') : textOf(e),
   }));
-  return { dims: dimsMatch ? dimsMatch.map(Number) : [points.length], points };
+  const parsed = parseArrayDimensions(attr(arrEl, 'dimensions'));
+  const points = allPoints.slice(0, MAX_ARRAY_CELLS);
+  return {
+    dims: parsed.declared.length ? (parsed.valid ? parsed.declared : []) : [points.length],
+    declaredDims: parsed.declared,
+    dimensionsValid: parsed.valid,
+    points,
+    truncated: allPoints.length > points.length,
+  };
+}
+
+const MAX_ARRAY_CELLS = 10000;
+const MAX_ARRAY_DIMENSION = 10000;
+function parseArrayDimensions(value) {
+  const declared = (String(value || '').match(/\d+/g) || []).map(Number);
+  if (!declared.length) return { declared, valid: true };
+  let cells = 1;
+  const valid = declared.every((dimension) => {
+    if (!Number.isSafeInteger(dimension) || dimension <= 0 || dimension > MAX_ARRAY_DIMENSION) return false;
+    if (cells > MAX_ARRAY_CELLS / dimension) return false;
+    cells *= dimension;
+    return true;
+  });
+  return { declared, valid };
+}
+
+function arrayShape(array) {
+  const dims = array.declaredDims && array.declaredDims.length ? array.declaredDims : array.dims;
+  const shape = dims && dims.length ? dims.join(' × ') : String(array.points.length);
+  return array.dimensionsValid === false ? `${shape} (display limited)` : shape;
 }
 
 // Parse <tr:Parameters>/<tr:Parameter> into step inputs and outputs.
@@ -1084,24 +1165,26 @@ function flattenRows(nodes) {
   return rows;
 }
 
-function renderStepsRow(row, onToggle) {
+function renderStepsRow(row, onToggle, isCollapsed = false) {
   const tr = el('tr', { class: 'st-row st-' + row.kind });
-  if (row.kind === 'step') tr.dataset.outcome = (row.outcome || '').toLowerCase();
+  if (row.kind === 'step') tr.dataset.outcome = resolveOutcome(row.outcome, row.node && row.node.outcomeQualifier);
+  if (row.kind === 'step' && isCollapsed) tr.classList.add('is-collapsed');
 
   // Steps column (name + hierarchy)
   const c1 = el('td', { class: 'st-cell st-name-cell' });
   c1.style.paddingLeft = `${10 + row.depth * 22}px`;
-  const chev = el('span', { class: 'st-chev' });
+  const chev = row.kind === 'step' && row.expandable
+    ? el('button', { class: 'st-chev', attrs: { type: 'button', 'aria-expanded': String(!isCollapsed), 'aria-label': isCollapsed ? 'Expand step' : 'Collapse step', title: isCollapsed ? 'Expand step' : 'Collapse step' } })
+    : el('span', { class: 'st-chev' });
   if (row.kind === 'step' && row.expandable) {
     chev.appendChild(el('nimble-icon-arrow-expander-down'));
     if (onToggle) {
-      chev.classList.add('clickable');
       chev.addEventListener('click', (ev) => { ev.stopPropagation(); onToggle(); });
     }
   }
   c1.appendChild(chev);
   if (row.kind === 'step') {
-    const nameEl = el('span', { class: 'st-name st-name-link', text: row.name, attrs: { title: 'View step details' } });
+    const nameEl = el('button', { class: 'st-name st-name-link', text: row.name, attrs: { type: 'button', title: 'View step details' } });
     nameEl.addEventListener('click', () => openStepDetails(row.node));
     c1.appendChild(nameEl);
   }
@@ -1241,9 +1324,9 @@ function renderMeasValue(td, m) {
 }
 
 function renderArrayPreview(td, array, name) {
-  const shape = (array.dims && array.dims.length) ? array.dims.join(' × ') : String(array.points.length);
+  const shape = arrayShape(array);
   const preview = array.points.slice(0, 5).map((p) => p.value).join(', ');
-  const more = array.points.length > 5 ? ', …' : '';
+  const more = array.points.length > 5 || array.truncated ? ', …' : '';
   const link = el('button', {
     class: 'array-link', attrs: { type: 'button', title: 'View full array' },
     text: `[${preview}${more}] (${shape})`,
@@ -1258,8 +1341,7 @@ function openArrayDialog(array, name) {
   const dlg = el('div', { class: 'array-dialog' });
   const head = el('div', { class: 'array-dialog-head' });
   head.appendChild(el('h3', { text: name || 'Array data' }));
-  const shape = (array.dims && array.dims.length) ? array.dims.join(' × ') : String(array.points.length);
-  head.appendChild(el('span', { class: 'array-dialog-shape', text: shape }));
+  head.appendChild(el('span', { class: 'array-dialog-shape', text: arrayShape(array) }));
   const exportBtn = el('button', { class: 'array-dialog-export', attrs: { type: 'button', title: 'Export to CSV' }, text: 'Export CSV' });
   exportBtn.addEventListener('click', () => downloadCsv(`${sanitizeFileName(name || 'array-data')}.csv`, arrayToCsv(array)));
   head.appendChild(exportBtn);
@@ -1267,6 +1349,9 @@ function openArrayDialog(array, name) {
   head.appendChild(closeBtn);
   dlg.appendChild(head);
   const body = el('div', { class: 'array-dialog-body' });
+  if (array.dimensionsValid === false || array.truncated) {
+    body.appendChild(el('p', { class: 'array-limit-warning', text: 'Array display is limited to protect browser memory.' }));
+  }
   body.appendChild(buildArrayTable(array));
   dlg.appendChild(body);
   overlay.appendChild(dlg);
@@ -1284,9 +1369,9 @@ function buildArrayTable(array) {
   const table = el('table', { class: 'array-table' });
   const thead = el('thead');
   const tbody = el('tbody');
-  if (dims.length >= 2) {
-    const rows = dims[0];
-    const cols = dims[1];
+  if (array.dimensionsValid !== false && dims.length >= 2) {
+    const rows = Math.min(dims[0], MAX_ARRAY_CELLS);
+    const cols = Math.min(dims[1], MAX_ARRAY_CELLS);
     const grid = Array.from({ length: rows }, () => new Array(cols).fill(''));
     for (const p of points) {
       const rI = p.pos[0]; const cI = p.pos[1];
@@ -1304,7 +1389,7 @@ function buildArrayTable(array) {
     }
   } else {
     thead.innerHTML = '<tr><th>#</th><th>Value</th></tr>';
-    points.forEach((p, i) => {
+    points.slice(0, MAX_ARRAY_CELLS).forEach((p, i) => {
       const tr = el('tr');
       tr.appendChild(el('td', { class: 'array-idx', text: String(p.pos.length ? p.pos[0] : i) }));
       tr.appendChild(el('td', { class: 'num', text: p.value }));
@@ -1321,9 +1406,9 @@ function arrayToCsv(array) {
   const dims = array.dims || [];
   const points = array.points || [];
   const rows = [];
-  if (dims.length >= 2) {
-    const nRows = dims[0];
-    const nCols = dims[1];
+  if (array.dimensionsValid !== false && dims.length >= 2) {
+    const nRows = Math.min(dims[0], MAX_ARRAY_CELLS);
+    const nCols = Math.min(dims[1], MAX_ARRAY_CELLS);
     const grid = Array.from({ length: nRows }, () => new Array(nCols).fill(''));
     for (const p of points) {
       const rI = p.pos[0]; const cI = p.pos[1];
@@ -1333,7 +1418,7 @@ function arrayToCsv(array) {
     for (let r = 0; r < nRows; r++) rows.push([r, ...grid[r]]);
   } else {
     rows.push(['#', 'Value']);
-    points.forEach((p, i) => rows.push([p.pos.length ? p.pos[0] : i, p.value]));
+    points.slice(0, MAX_ARRAY_CELLS).forEach((p, i) => rows.push([p.pos.length ? p.pos[0] : i, p.value]));
   }
   return rows.map((r) => r.map(csvCell).join(',')).join('\r\n');
 }
@@ -1427,7 +1512,7 @@ function statusIcon(outcome, qualifier) {
 function countStats(nodes, stats) {
   for (const n of nodes) {
     stats.total++;
-    const o = (n.outcome || '').toLowerCase();
+    const o = resolveOutcome(n.outcome, n.outcomeQualifier);
     if (o === 'passed') stats.passed++;
     else if (o === 'failed') stats.failed++;
     else if (o === 'done') stats.done++;
@@ -1633,6 +1718,20 @@ function highlightXml(text) {
   return out;
 }
 
+const RAW_HIGHLIGHT_MAX = 1_000_000;
+function renderRawXml() {
+  const code = $('#raw-code');
+  if (!code || state.rawViewRenderedFor === state.currentRawText) return;
+  state.rawViewRenderedFor = state.currentRawText;
+  if (state.currentRawText.length > RAW_HIGHLIGHT_MAX) {
+    code.classList.add('raw-plain');
+    code.textContent = state.currentRawText;
+  } else {
+    code.classList.remove('raw-plain');
+    code.innerHTML = highlightXml(state.currentRawText);
+  }
+}
+
 function highlightXmlTag(tok, esc) {
   const mm = /^<(\/?)([A-Za-z_][\w:.\-]*)([\s\S]*?)(\/?)>$/.exec(tok);
   if (!mm) return spanHtml('tag', esc(tok));
@@ -1648,6 +1747,7 @@ function highlightXmlTag(tok, esc) {
 let suppressViewToggle = false;
 function setView(which) {
   const rendered = which === 'rendered';
+  if (!rendered) renderRawXml();
   $('#viewer-body').hidden = !rendered;
   $('#raw-view').hidden = rendered;
   suppressViewToggle = true;
@@ -1707,13 +1807,24 @@ function openStepDetails(node) {
     data.appendChild(el('div', { class: 'drawer-empty', text: 'No data' }));
   }
 
+  const drawer = $('#step-drawer');
+  state.stepDrawerReturnFocus = document.activeElement;
   setDrawerTab('info');
-  $('#step-drawer').classList.add('open');
+  drawer.inert = false;
+  drawer.setAttribute('aria-hidden', 'false');
+  drawer.classList.add('open');
   $('#drawer-backdrop').classList.add('open');
+  requestAnimationFrame(() => $('#drawer-close').focus());
 }
 function closeStepDetails() {
-  $('#step-drawer').classList.remove('open');
+  const drawer = $('#step-drawer');
+  drawer.classList.remove('open');
+  drawer.inert = true;
+  drawer.setAttribute('aria-hidden', 'true');
   $('#drawer-backdrop').classList.remove('open');
+  const target = state.stepDrawerReturnFocus;
+  state.stepDrawerReturnFocus = null;
+  if (target && target.isConnected && typeof target.focus === 'function') target.focus();
 }
 function setDrawerTab(which) {
   const info = which === 'info';
@@ -1721,6 +1832,10 @@ function setDrawerTab(which) {
   $('#drawer-data').hidden = info;
   $('#dtab-info').classList.toggle('active', info);
   $('#dtab-data').classList.toggle('active', !info);
+  $('#dtab-info').setAttribute('aria-selected', String(info));
+  $('#dtab-data').setAttribute('aria-selected', String(!info));
+  $('#dtab-info').tabIndex = info ? 0 : -1;
+  $('#dtab-data').tabIndex = info ? -1 : 0;
 }
 // Render report-text "details": base64 images become clickable thumbnails and
 // everything else is shown as full text (no name labels).
@@ -1872,18 +1987,29 @@ const uploadKeys = new Set();   // name+size keys for O(1) de-duplication
 let importRunning = false;   // true while a run is in progress (locks remove buttons)
 
 function openUploadDrawer() {
+  state.uploadDrawerReturnFocus = document.activeElement;
   // Start each import session fresh — clear any previously listed files.
   uploadQueue.length = 0;
   uploadKeys.clear();
   $('#upload-rows').innerHTML = '';
   hideUploadProgress();
   renderUploadRows();
-  $('#upload-drawer').classList.add('open');
+  const drawer = $('#upload-drawer');
+  drawer.inert = false;
+  drawer.setAttribute('aria-hidden', 'false');
+  drawer.classList.add('open');
   $('#upload-backdrop').classList.add('open');
+  requestAnimationFrame(() => $('#upload-close').focus());
 }
 function closeUploadDrawer() {
-  $('#upload-drawer').classList.remove('open');
+  const drawer = $('#upload-drawer');
+  drawer.classList.remove('open');
+  drawer.inert = true;
+  drawer.setAttribute('aria-hidden', 'true');
   $('#upload-backdrop').classList.remove('open');
+  const target = state.uploadDrawerReturnFocus;
+  state.uploadDrawerReturnFocus = null;
+  if (target && target.isConnected && typeof target.focus === 'function') target.focus();
 }
 
 // Open the import drawer. When an ATML file is currently being viewed, queue it
@@ -2019,17 +2145,25 @@ function updateUploadRow(q) {
   if (q._timeTd) q._timeTd.textContent = uploadElapsedText(q);
 }
 
+function effectiveImportWorkspace(q, fallbackWorkspace) {
+  return q.serviceFileId ? (q.workspace || fallbackWorkspace) : fallbackWorkspace;
+}
+
 // Returns a message if the current import options exceed the caller's
-// permissions in the target workspace, or null when the import is allowed.
+// permissions in the effective workspace for any queued file.
 function importPermissionIssue() {
-  const ws = $('#upload-workspace').value;
   const createResults = $('#opt-create-results').checked;
   const replace = $('#opt-replace-existing').checked;
-  if (!can(PERM.uploadFile, ws)) return 'You do not have permission to upload files to this workspace. Select a workspace you can write to.';
-  if (createResults && !can(PERM.createResult, ws)) return 'You do not have permission to create test results in this workspace.';
-  if (replace) {
-    if (!can(PERM.deleteFile, ws)) return 'You do not have permission to replace (delete) files in this workspace.';
-    if (createResults && !can(PERM.deleteResult, ws)) return 'You do not have permission to replace (delete) results in this workspace.';
+  const selectedWorkspace = $('#upload-workspace').value;
+  const ready = uploadQueue.filter((q) => q.state === 'ready');
+  for (const q of ready) {
+    const ws = effectiveImportWorkspace(q, selectedWorkspace);
+    if (!q.serviceFileId && !can(PERM.uploadFile, ws)) return 'You do not have permission to upload one or more files to the selected workspace.';
+    if (createResults && !can(PERM.createResult, ws)) return 'You do not have permission to create test results for one or more files.';
+    if (replace) {
+      if (!can(PERM.deleteFile, ws)) return 'You do not have permission to replace (delete) one or more files.';
+      if (createResults && !can(PERM.deleteResult, ws)) return 'You do not have permission to replace (delete) one or more results.';
+    }
   }
   return null;
 }
@@ -2039,20 +2173,26 @@ function importPermissionIssue() {
 function canImportToAnyWorkspace() {
   const ids = Object.keys(state.workspaceNames || {});
   if (!state.authStatements || !ids.length) return true;
-  return ids.some((id) => can(PERM.uploadFile, id));
+  const createResults = $('#opt-create-results').checked;
+  const replace = $('#opt-replace-existing').checked;
+  const selectedWorkspace = $('#upload-workspace').value;
+  const ready = uploadQueue.filter((q) => q.state === 'ready');
+  return ready.some((q) => {
+    const ws = effectiveImportWorkspace(q, selectedWorkspace);
+    return (q.serviceFileId || can(PERM.uploadFile, ws))
+      && (!createResults || can(PERM.createResult, ws))
+      && (!replace || can(PERM.deleteFile, ws))
+      && (!replace || !createResults || can(PERM.deleteResult, ws));
+  });
 }
 
 function updateUploadOkDisabled() {
   const anyWrite = canImportToAnyWorkspace();
-  const issue = anyWrite
-    ? importPermissionIssue()
-    : 'You do not have permission to import files to any workspace.';
+  const issue = importPermissionIssue();
   const msg = $('#upload-perm-msg');
-  if (msg) { msg.textContent = issue || ''; msg.hidden = !issue; }
+  if (msg) { msg.textContent = issue || (!anyWrite ? 'You do not have permission to import these files.' : ''); msg.hidden = !issue && anyWrite; }
   const hasReady = uploadQueue.some((q) => q.state === 'ready');
-  // Only hard-disable when the user can't write anywhere; a selected-workspace
-  // issue is shown as a warning so they can switch to a writable workspace.
-  $('#upload-ok').disabled = !hasReady || !anyWrite;
+  $('#upload-ok').disabled = !hasReady || !anyWrite || !!issue;
 }
 
 // Import-run progress bar (footer). done/total files processed this run.
@@ -2381,9 +2521,8 @@ function buildResultAndSteps(doc, opts) {
   const rootNodes = resultSets.map(buildResultSetRootNode);
 
   const operator = attr(firstByLocal(results, 'SystemOperator'), 'name') || null;
-  const uutEl = firstChildByLocal(results, 'UUT');
-  const serial = textOf(firstByLocal(uutEl || results, 'SerialNumber')) || null;
-  const stationSerial = textOf(firstByLocal(firstChildByLocal(results, 'TestStation') || results, 'SerialNumber')) || null;
+  const serial = resultSetValue(resultSets, 'UUT', 'SerialNumber') || null;
+  const stationSerial = resultSetValue(resultSets, 'TestStation', 'SerialNumber') || null;
   const partNumber = extractPartNumber(results);
   const rootStatus = statusObjectFor({ outcome: aggregateOutcome(resultSets.map(outcomeOf)) });
   const resultSetNames = resultSets.map((resultSet) => prettySequenceName(attr(resultSet, 'name')));
@@ -2461,15 +2600,17 @@ async function importOneFile(q, opts) {
   const checksum = await sha256Hex(text);
   q.checksum = checksum;
 
+  if (isServiceFile && !opts.createResults) {
+    return { state: 'skipped', detail: 'Skipped — Create result data is disabled for an existing File Service file.' };
+  }
+
   let doc = null;
-  if (opts.createResults || isServiceFile) {
+  if (opts.createResults) {
     doc = new DOMParser().parseFromString(text, 'application/xml');
     if (doc.querySelector('parsererror')) throw new Error('File is not valid XML.');
     if (!isAtml(doc)) throw new Error('File is not recognized as ATML.');
   }
 
-  // A file already in the service (the one being viewed) is always imported as a
-  // result — there is nothing to upload, so the upload-only path doesn't apply.
   if (!opts.createResults && !isServiceFile) {
     // Dedup by checksum even when not creating results: a file already in the
     // service (orphan upload or one linked to a prior result) must not be
@@ -2521,24 +2662,27 @@ async function importOneFile(q, opts) {
 
   const { resultRequest, buildSteps } = buildResultAndSteps(doc, { checksum, workspaceId: resultWsId, fileId });
   resultRequest.fileIds = linkFileIds;
-  const resultId = await tmCreateResult(resultRequest);
-  const steps = buildSteps(resultId);
-  if (steps.length) {
-    await tmCreateSteps(steps, (uploaded, total) => {
-      q.detail = `Uploading steps ${uploaded.toLocaleString()} / ${total.toLocaleString()}…`;
-      updateUploadRow(q);
-    });
-  }
-  // Mark integrity Complete only after every step batch has been uploaded, so
-  // an interrupted transfer leaves the result flagged "Incomplete".
+  let resultId = null;
+  let steps = [];
   try {
+    resultId = await tmCreateResult(resultRequest);
+    steps = buildSteps(resultId);
+    if (steps.length) {
+      await tmCreateSteps(steps, (uploaded, total) => {
+        q.detail = `Uploading steps ${uploaded.toLocaleString()} / ${total.toLocaleString()}…`;
+        updateUploadRow(q);
+      });
+    }
+    // Mark integrity Complete only after every step batch has been uploaded, so
+    // an interrupted transfer leaves the result flagged "Incomplete".
     await tmUpdateResultProperties(resultId, { 'ATML Integrity': 'Complete' });
     for (const fid of linkFileIds) {
       await updateFileMetadata(fid, { 'ATML Checksum': checksum, testResultId: resultId });
     }
   } catch (e) {
-    await cleanupCreatedResult(resultId, fileId, createdFile);
-    throw new Error(`Test result was created but could not be finalized: ${e.message}`);
+    if (resultId) await cleanupCreatedResult(resultId, fileId, createdFile);
+    else if (createdFile) await deleteFiles([fileId]).catch((cleanupError) => console.warn('[import] cleanup file after result creation failure failed', cleanupError));
+    throw new Error(`ATML import failed: ${e.message}`);
   }
 
   let replaced = false;
@@ -2648,7 +2792,6 @@ async function runUpload() {
 async function refreshAfterImport(importedIds) {
   const wanted = new Set((importedIds || []).filter(Boolean));
   for (let attempt = 0; attempt < 6; attempt++) {
-    state.loading = false; // ensure the refresh isn't skipped by the in-flight guard
     await loadFiles();
     if (!wanted.size) return;
     const present = state.allFiles.some((f) => wanted.has(f.id));
@@ -2735,6 +2878,13 @@ function init() {
   $('#drawer-backdrop').addEventListener('click', closeStepDetails);
   $('#dtab-info').addEventListener('click', () => setDrawerTab('info'));
   $('#dtab-data').addEventListener('click', () => setDrawerTab('data'));
+  [$('#dtab-info'), $('#dtab-data')].forEach((tab, index, tabs) => tab.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault();
+    const next = tabs[(index + (e.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length];
+    next.focus();
+    setDrawerTab(next === $('#dtab-info') ? 'info' : 'data');
+  }));
   $('#img-lightbox').addEventListener('click', closeImageLightbox);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (timeControl) timeControl.close(); closeImageLightbox(); closeStepDetails(); closeUploadDrawer(); } });
 
