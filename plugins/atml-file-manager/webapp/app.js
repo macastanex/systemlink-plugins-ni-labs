@@ -44,6 +44,7 @@ const state = {
   rawViewRenderedFor: null,
   stepDrawerReturnFocus: null,
   uploadDrawerReturnFocus: null,
+  imageLightboxReturnFocus: null,
 };
 
 /* ---------- DOM helpers ---------- */
@@ -1454,18 +1455,48 @@ function downloadCsv(filename, text) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-// Render a value into a cell; if it contains base64 image data URIs, show the
-// is injected), so this is safe from script injection.
+// Render a value into a cell; base64 image data URIs are turned into clickable
+// thumbnails while all surrounding text remains visible as text nodes.
 const DATA_URI_RE = /data:image\/[a-zA-Z0-9.+-]+;base64,[A-Za-z0-9+/=]+/g;
+function appendDataImage(container, src, alt) {
+  const img = el('img', { class: 'data-img', attrs: {
+    src, alt, loading: 'lazy', title: 'Click to enlarge', role: 'button', tabindex: '0',
+    'aria-label': `${alt}; activate to enlarge`,
+  } });
+  const open = (event) => {
+    event.stopPropagation();
+    openImageLightbox(src, event.currentTarget);
+  };
+  img.addEventListener('click', open);
+  img.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    open(event);
+  });
+  container.appendChild(img);
+}
+function appendValueParts(container, value, textTag, textClass, imageAlt) {
+  const s = value == null ? '' : String(value);
+  let lastIndex = 0;
+  let hasImage = false;
+  for (const match of s.matchAll(DATA_URI_RE)) {
+    hasImage = true;
+    if (match.index > lastIndex) {
+      container.appendChild(el(textTag, { class: textClass, text: s.slice(lastIndex, match.index) }));
+    }
+    appendDataImage(container, match[0], imageAlt);
+    lastIndex = match.index + match[0].length;
+  }
+  if (!hasImage || lastIndex < s.length) {
+    container.appendChild(el(textTag, { class: textClass, text: s.slice(lastIndex) }));
+  }
+  return hasImage;
+}
 function renderValueInto(td, value) {
   const s = value == null ? '' : String(value);
   const uris = s.match(DATA_URI_RE);
   if (uris && uris.length) {
-    for (const u of uris) {
-      const img = el('img', { class: 'data-img', attrs: { src: u, alt: 'embedded image', loading: 'lazy', title: 'Click to enlarge' } });
-      img.addEventListener('click', (e) => { e.stopPropagation(); openImageLightbox(u); });
-      td.appendChild(img);
-    }
+    appendValueParts(td, s, 'span', 'data-text', 'embedded image');
     td.classList.add('has-images');
   } else if (s.length > 200) {
     // Keep the DOM light for very long values; CSS clips to one row and the
@@ -1479,16 +1510,31 @@ function renderValueInto(td, value) {
   }
 }
 
-function openImageLightbox(src) {
+function openImageLightbox(src, trigger) {
   const box = $('#img-lightbox');
   const img = $('#img-lightbox-img');
   if (!box || !img) return;
+  if (!box.classList.contains('open')) state.imageLightboxReturnFocus = trigger || document.activeElement;
   img.src = src;
   box.hidden = false;
+  box.classList.add('open');
+  box.setAttribute('aria-hidden', 'false');
+  updateApplicationInert();
+  requestAnimationFrame(() => {
+    if (box.classList.contains('open')) $('#img-lightbox-close').focus();
+  });
 }
 function closeImageLightbox() {
   const box = $('#img-lightbox');
-  if (box) box.hidden = true;
+  if (!box || !box.classList.contains('open')) return;
+  box.hidden = true;
+  box.classList.remove('open');
+  box.setAttribute('aria-hidden', 'true');
+  $('#img-lightbox-img').removeAttribute('src');
+  const target = state.imageLightboxReturnFocus;
+  state.imageLightboxReturnFocus = null;
+  updateApplicationInert();
+  if (target && target.isConnected && typeof target.focus === 'function') target.focus();
 }
 
 // Resolve an ATML outcome to its effective status. TestStand emits skipped/etc.
@@ -1841,11 +1887,12 @@ function openStepDetails(node) {
 }
 function closeStepDetails() {
   const drawer = $('#step-drawer');
+  if (!drawer.classList.contains('open')) return;
   drawer.classList.remove('open');
   drawer.inert = true;
   drawer.setAttribute('aria-hidden', 'true');
   $('#drawer-backdrop').classList.remove('open');
-  setApplicationInert(false);
+  updateApplicationInert();
   const target = state.stepDrawerReturnFocus;
   state.stepDrawerReturnFocus = null;
   if (target && target.isConnected && typeof target.focus === 'function') target.focus();
@@ -1856,13 +1903,21 @@ function setApplicationInert(inert) {
     if (element) element.inert = inert;
   }
 }
+function updateApplicationInert() {
+  setApplicationInert(!!document.querySelector('.step-drawer.open, .upload-drawer.open, .img-lightbox.open'));
+}
+function openModal() {
+  const lightbox = $('#img-lightbox');
+  if (lightbox && lightbox.classList.contains('open')) return lightbox;
+  return document.querySelector('.step-drawer.open, .upload-drawer.open');
+}
 function modalFocusableElements(drawer) {
   return Array.from(drawer.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"]), nimble-button, nimble-checkbox, nimble-select'))
     .filter((element) => !element.hidden && !element.disabled && element.getAttribute('aria-hidden') !== 'true');
 }
 function trapDrawerFocus(event) {
   if (event.key !== 'Tab') return;
-  const drawer = document.querySelector('.step-drawer.open, .upload-drawer.open');
+  const drawer = openModal();
   if (!drawer) return;
   const focusable = modalFocusableElements(drawer);
   if (!focusable.length) {
@@ -1897,16 +1952,7 @@ function renderDetailsBlock(values) {
   const wrap = el('div', { class: 'drawer-details' });
   for (const v of values) {
     const s = v == null ? '' : String(v);
-    const uris = s.match(DATA_URI_RE);
-    if (uris && uris.length) {
-      for (const u of uris) {
-        const img = el('img', { class: 'data-img', attrs: { src: u, alt: 'report image', loading: 'lazy', title: 'Click to enlarge' } });
-        img.addEventListener('click', (e) => { e.stopPropagation(); openImageLightbox(u); });
-        wrap.appendChild(img);
-      }
-    } else {
-      wrap.appendChild(el('pre', { class: 'detail-text', text: s }));
-    }
+    appendValueParts(wrap, s, 'pre', 'detail-text', 'report image');
   }
   return wrap;
 }
@@ -2061,11 +2107,12 @@ function openUploadDrawer() {
 function closeUploadDrawer() {
   if (importRunning) return;
   const drawer = $('#upload-drawer');
+  if (!drawer.classList.contains('open')) return;
   drawer.classList.remove('open');
   drawer.inert = true;
   drawer.setAttribute('aria-hidden', 'true');
   $('#upload-backdrop').classList.remove('open');
-  setApplicationInert(false);
+  updateApplicationInert();
   const target = state.uploadDrawerReturnFocus;
   state.uploadDrawerReturnFocus = null;
   if (target && target.isConnected && typeof target.focus === 'function') target.focus();
@@ -2578,12 +2625,36 @@ async function updateFileMetadata(fileId, properties) {
   });
 }
 async function deleteExistingArtifacts(results, fileIds, sourceFileId, importOptions, workspaceId) {
-  if (results.length) await tmDeleteResults(results.map((result) => result.id));
-  const idsToDelete = fileIds.filter((id) => id !== sourceFileId);
-  if (idsToDelete.length) {
-    await deleteFiles(idsToDelete);
-    await removeFilesFromChecksumIndex(idsToDelete, workspaceId, importOptions);
+  const warnings = [];
+  let resultsDeleted = results.length === 0;
+  if (results.length) {
+    try {
+      await tmDeleteResults(results.map((result) => result.id));
+      resultsDeleted = true;
+    } catch (error) {
+      warnings.push(`Could not delete existing test result(s): ${error.message}`);
+    }
   }
+  const idsToDelete = fileIds.filter((id) => id !== sourceFileId);
+  if (idsToDelete.length && resultsDeleted) {
+    try {
+      await deleteFiles(idsToDelete);
+    } catch (error) {
+      warnings.push(`Could not delete existing file(s): ${error.message}`);
+      return warnings;
+    }
+    try {
+      await removeFilesFromChecksumIndex(idsToDelete, workspaceId, importOptions);
+    } catch (error) {
+      warnings.push(`Replacement succeeded, but the local file index could not be updated: ${error.message}`);
+    }
+  } else if (idsToDelete.length && !resultsDeleted) {
+    warnings.push('Existing files were retained because their test result could not be deleted.');
+  }
+  return warnings;
+}
+function cleanupWarningText(warnings) {
+  return warnings.length ? ` Cleanup warning: ${warnings.join(' ')}` : '';
 }
 function assertReplacementPermissions(results, fileIds, sourceFileId, workspaceId) {
   if (results.length && !can(PERM.deleteResult, workspaceId)) {
@@ -2600,9 +2671,12 @@ async function cleanupCreatedResult(resultId, fileId, deleteFile) {
 async function rollbackFileMetadata(updates) {
   for (const update of updates) {
     const previous = update.previous || {};
-    const properties = Object.prototype.hasOwnProperty.call(previous, 'testResultId')
-      ? { testResultId: previous.testResultId }
-      : { testResultId: null };
+    const properties = {
+      'ATML Checksum': Object.prototype.hasOwnProperty.call(previous, 'ATML Checksum')
+        ? previous['ATML Checksum'] ?? null : null,
+      testResultId: Object.prototype.hasOwnProperty.call(previous, 'testResultId')
+        ? previous.testResultId ?? null : null,
+    };
     await updateFileMetadata(update.id, properties).catch((error) => console.warn('[import] metadata rollback failed', error));
   }
 }
@@ -2782,6 +2856,8 @@ async function importOneFileLocked(q, opts, workspaceId, text, checksum) {
     if (existingFileIds.length && !opts.replace) {
       return { state: 'skipped', detail: `Skipped — a file with this checksum already exists (${existingFileIds.length} file(s)). Enable "Replace existing files/results?" to overwrite.` };
     }
+    const replacing = existingFileIds.length > 0 || priorResults.length > 0;
+    if (replacing && opts.replace) assertReplacementPermissions(priorResults, existingFileIds, null, workspaceId);
     const id = await uploadFileToService(q.file, opts.workspaceId);
     try {
       await updateFileMetadata(id, { 'ATML Checksum': checksum });
@@ -2790,11 +2866,13 @@ async function importOneFileLocked(q, opts, workspaceId, text, checksum) {
       throw new Error(`File uploaded but its checksum metadata could not be saved: ${e.message}`);
     }
     await indexFileForChecksum({ id, workspace: workspaceId, properties: { 'ATML Checksum': checksum } }, workspaceId, opts);
-    const replaced = existingFileIds.length > 0 && opts.replace;
-    if (replaced) await deleteExistingArtifacts(priorResults, existingFileIds, id, opts, workspaceId);
+    const replaced = replacing && opts.replace;
+    const cleanupWarnings = replaced
+      ? await deleteExistingArtifacts(priorResults, existingFileIds, id, opts, workspaceId)
+      : [];
     return {
       state: replaced ? 'replaced' : 'uploaded',
-      detail: `${replaced ? 'Replaced existing file' : 'File uploaded'} (checksum ${checksum.slice(0, 12)}…). No result created.`,
+      detail: `${replaced ? 'Replaced existing file' : 'File uploaded'} (checksum ${checksum.slice(0, 12)}…). No result created.${cleanupWarningText(cleanupWarnings)}`,
       fileId: id,
     };
   }
@@ -2855,15 +2933,16 @@ async function importOneFileLocked(q, opts, workspaceId, text, checksum) {
   }
 
   let replaced = false;
+  let cleanupWarnings = [];
   if (replacing) {
-    await deleteExistingArtifacts(existingResults, existingFileIds, fileId, opts, workspaceId);
+    cleanupWarnings = await deleteExistingArtifacts(existingResults, existingFileIds, fileId, opts, workspaceId);
     replaced = true;
   }
 
   let resultState, detail;
   if (replaced) {
     resultState = 'replaced';
-    detail = `Replaced existing file/result. Created result ${resultId} with ${steps.length} step(s).`;
+    detail = `Replaced existing file/result. Created result ${resultId} with ${steps.length} step(s).${cleanupWarningText(cleanupWarnings)}`;
   } else if (isServiceFile) {
     resultState = 'created';
     detail = `Created result ${resultId} with ${steps.length} step(s) from the viewed file.`;
@@ -3054,10 +3133,17 @@ function init() {
     next.focus();
     setDrawerTab(next === $('#dtab-info') ? 'info' : 'data');
   }));
-  $('#img-lightbox').addEventListener('click', closeImageLightbox);
+  $('#img-lightbox').addEventListener('click', (event) => {
+    if (event.target === $('#img-lightbox')) closeImageLightbox();
+  });
+  $('#img-lightbox-close').addEventListener('click', closeImageLightbox);
   document.addEventListener('keydown', (e) => {
     trapDrawerFocus(e);
-    if (e.key === 'Escape') { if (timeControl) timeControl.close(); closeImageLightbox(); closeStepDetails(); closeUploadDrawer(); }
+    if (e.key !== 'Escape') return;
+    if (timeControl && timeControl.dialog && timeControl.dialog.open) { timeControl.close(); return; }
+    if ($('#img-lightbox').classList.contains('open')) { closeImageLightbox(); return; }
+    if ($('#upload-drawer').classList.contains('open')) { closeUploadDrawer(); return; }
+    if ($('#step-drawer').classList.contains('open')) closeStepDetails();
   });
 
   wireUploadDrawer();

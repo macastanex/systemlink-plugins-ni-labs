@@ -348,6 +348,11 @@ body.col-resizing { cursor: col-resize; user-select: none; }
   display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, .8); cursor: zoom-out; padding: 24px;
 }
+.img-lightbox-close {
+  position: absolute; top: 16px; right: 20px; z-index: 1;
+  width: 34px; height: 34px; padding: 0; border: 1px solid rgba(255, 255, 255, .6);
+  background: rgba(0, 0, 0, .35); color: #fff; cursor: pointer; font-size: 24px; line-height: 1;
+}
 .img-lightbox img { max-width: 96vw; max-height: 96vh; width: auto; height: auto; object-fit: contain; background: #fff; box-shadow: 0 4px 30px rgba(0, 0, 0, .5); }
 .no-results { padding: 24px; text-align: center; color: var(--text-muted); }
 

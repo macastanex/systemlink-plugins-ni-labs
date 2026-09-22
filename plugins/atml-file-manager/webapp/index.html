@@ -192,8 +192,9 @@
   </aside>
 
   <!-- Image lightbox -->
-  <div id="img-lightbox" class="img-lightbox" hidden>
-    <img id="img-lightbox-img" alt="Enlarged image" />
+  <div id="img-lightbox" class="img-lightbox" role="dialog" aria-modal="true" aria-label="Enlarged image" aria-hidden="true" hidden tabindex="-1">
+    <button id="img-lightbox-close" class="img-lightbox-close" type="button" aria-label="Close enlarged image">×</button>
+    <img id="img-lightbox-img" alt="Enlarged image" tabindex="0" />
   </div>
   </nimble-theme-provider>
 
