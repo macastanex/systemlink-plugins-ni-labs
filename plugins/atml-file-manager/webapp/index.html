@@ -130,9 +130,9 @@
 
   <!-- Step details slide-out -->
   <div id="drawer-backdrop" class="drawer-backdrop"></div>
-  <aside id="step-drawer" class="step-drawer" aria-label="Step details" aria-hidden="true" inert>
+  <aside id="step-drawer" class="step-drawer" role="dialog" aria-modal="true" aria-labelledby="step-drawer-title" aria-hidden="true" inert tabindex="-1">
     <header class="drawer-header">
-      <h2>Step Details</h2>
+      <h2 id="step-drawer-title">Step Details</h2>
       <div id="drawer-step-name" class="drawer-subtitle"></div>
     </header>
     <div class="drawer-tabs" role="tablist" aria-label="Step detail views">
@@ -150,9 +150,9 @@
 
   <!-- Import ATML data slide-out -->
   <div id="upload-backdrop" class="drawer-backdrop"></div>
-  <aside id="upload-drawer" class="upload-drawer" aria-label="Import ATML data" aria-hidden="true" inert>
+  <aside id="upload-drawer" class="upload-drawer" role="dialog" aria-modal="true" aria-labelledby="upload-drawer-title" aria-hidden="true" inert tabindex="-1">
     <header class="drawer-header">
-      <h2>Import ATML data</h2>
+      <h2 id="upload-drawer-title">Import ATML data</h2>
     </header>
     <div class="upload-body">
       <label class="upload-label" for="upload-workspace">Workspace</label>

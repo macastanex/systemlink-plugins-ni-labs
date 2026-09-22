@@ -529,12 +529,18 @@ const ATML_NS_HINTS = ['ieee-1636', 'ieee-1671', 'atmltestresults'];
 function isAtml(doc) {
   const root = doc.documentElement;
   if (!root) return false;
-  const ln = (root.localName || '').toLowerCase();
-  if (ln === 'testresultscollection' || ln === 'testresults') return true;
-  const ns = (root.namespaceURI || '').toLowerCase();
-  if (ATML_NS_HINTS.some((h) => ns.includes(h))) return true;
-  // Fallback: look for a ResultSet anywhere.
-  return !!firstByLocal(root, 'ResultSet');
+  const rootLocal = (root.localName || '').toLowerCase();
+  const resultContainers = rootLocal === 'testresults'
+    ? [root]
+    : rootLocal === 'testresultscollection' ? childrenByLocal(root, 'TestResults') : [];
+  if (!resultContainers.length) return false;
+
+  const elements = [root, ...root.querySelectorAll('*')];
+  const hasRecognizedNamespace = elements.some((element) => {
+    const ns = (element.namespaceURI || '').toLowerCase();
+    return ATML_NS_HINTS.some((hint) => ns.includes(hint));
+  });
+  return hasRecognizedNamespace && resultContainers.some((container) => childrenByLocal(container, 'ResultSet').length > 0);
 }
 
 /* ---------- namespace-agnostic traversal ---------- */
@@ -1829,6 +1835,7 @@ function openStepDetails(node) {
   drawer.inert = false;
   drawer.setAttribute('aria-hidden', 'false');
   drawer.classList.add('open');
+  setApplicationInert(true);
   $('#drawer-backdrop').classList.add('open');
   requestAnimationFrame(() => $('#drawer-close').focus());
 }
@@ -1838,9 +1845,40 @@ function closeStepDetails() {
   drawer.inert = true;
   drawer.setAttribute('aria-hidden', 'true');
   $('#drawer-backdrop').classList.remove('open');
+  setApplicationInert(false);
   const target = state.stepDrawerReturnFocus;
   state.stepDrawerReturnFocus = null;
   if (target && target.isConnected && typeof target.focus === 'function') target.focus();
+}
+function setApplicationInert(inert) {
+  for (const selector of ['.app-header', '.app-main']) {
+    const element = document.querySelector(selector);
+    if (element) element.inert = inert;
+  }
+}
+function modalFocusableElements(drawer) {
+  return Array.from(drawer.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"]), nimble-button, nimble-checkbox, nimble-select'))
+    .filter((element) => !element.hidden && !element.disabled && element.getAttribute('aria-hidden') !== 'true');
+}
+function trapDrawerFocus(event) {
+  if (event.key !== 'Tab') return;
+  const drawer = document.querySelector('.step-drawer.open, .upload-drawer.open');
+  if (!drawer) return;
+  const focusable = modalFocusableElements(drawer);
+  if (!focusable.length) {
+    event.preventDefault();
+    drawer.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && (document.activeElement === first || !drawer.contains(document.activeElement))) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 function setDrawerTab(which) {
   const info = which === 'info';
@@ -2003,6 +2041,7 @@ const uploadKeys = new Set();   // name+size keys for O(1) de-duplication
 let importRunning = false;   // true while a run is in progress (locks remove buttons)
 
 function openUploadDrawer() {
+  if (importRunning) return false;
   state.uploadDrawerReturnFocus = document.activeElement;
   // Start each import session fresh — clear any previously listed files.
   uploadQueue.length = 0;
@@ -2014,15 +2053,19 @@ function openUploadDrawer() {
   drawer.inert = false;
   drawer.setAttribute('aria-hidden', 'false');
   drawer.classList.add('open');
+  setApplicationInert(true);
   $('#upload-backdrop').classList.add('open');
   requestAnimationFrame(() => $('#upload-close').focus());
+  return true;
 }
 function closeUploadDrawer() {
+  if (importRunning) return;
   const drawer = $('#upload-drawer');
   drawer.classList.remove('open');
   drawer.inert = true;
   drawer.setAttribute('aria-hidden', 'true');
   $('#upload-backdrop').classList.remove('open');
+  setApplicationInert(false);
   const target = state.uploadDrawerReturnFocus;
   state.uploadDrawerReturnFocus = null;
   if (target && target.isConnected && typeof target.focus === 'function') target.focus();
@@ -2031,7 +2074,7 @@ function closeUploadDrawer() {
 // Open the import drawer. When an ATML file is currently being viewed, queue it
 // (reusing the File Service copy) so the user can import what they're looking at.
 function openImport() {
-  openUploadDrawer();
+  if (!openUploadDrawer()) return;
   if (state.currentFormat === 'atml' && state.currentFile && state.currentRawText) {
     const entry = addServiceFile(state.currentFile, state.currentRawText);
     const wsSel = $('#upload-workspace');
@@ -2229,6 +2272,7 @@ function setImportControlsDisabled(disabled) {
   $('#opt-create-results').disabled = disabled;
   $('#opt-replace-existing').disabled = disabled;
   $('#dz-browse').disabled = disabled;
+  $('#upload-close').disabled = disabled;
   $('#dropzone').classList.toggle('disabled', disabled);
   document.querySelectorAll('#upload-rows .ul-remove').forEach((b) => { b.disabled = disabled; });
 }
@@ -2452,11 +2496,12 @@ async function tmUpdateResultProperties(resultId, properties) {
     replace: false,
   });
 }
-// Locate files tagged with a given ATML Checksum in one workspace. Paging the
-// workspace query avoids both cross-workspace matches and search result caps.
-async function findFilesByChecksum(checksum, workspaceId) {
-  if (!workspaceId) return [];
-  const matches = [];
+// Build one checksum index per workspace for an import run. Paging the
+// workspace query avoids cross-workspace matches and search result caps while
+// preventing one full scan per queued file.
+async function buildFileChecksumIndex(workspaceId) {
+  if (!workspaceId) return new Map();
+  const index = new Map();
   let skip = 0;
   let total = null;
   while (total === null || skip < total) {
@@ -2468,14 +2513,56 @@ async function findFilesByChecksum(checksum, workspaceId) {
     const data = await res.json();
     const page = data.availableFiles || data.files || data.value || [];
     for (const file of page) {
-      const properties = file.properties || {};
-      if (properties['ATML Checksum'] === checksum) matches.push(file);
+      const checksum = (file.properties || {})['ATML Checksum'];
+      if (!checksum) continue;
+      if (!index.has(checksum)) index.set(checksum, []);
+      index.get(checksum).push(file);
     }
     total = data.totalCount != null ? data.totalCount : skip + page.length;
     if (!page.length) break;
     skip += page.length;
   }
-  return matches;
+  return index;
+}
+function getFileChecksumIndex(workspaceId, importOptions) {
+  const indexes = importOptions.fileChecksumIndexes || (importOptions.fileChecksumIndexes = new Map());
+  let pending = indexes.get(workspaceId);
+  if (!pending) {
+    pending = buildFileChecksumIndex(workspaceId);
+    indexes.set(workspaceId, pending);
+  }
+  return pending.catch((error) => {
+    if (indexes.get(workspaceId) === pending) indexes.delete(workspaceId);
+    throw error;
+  });
+}
+async function findFilesByChecksum(checksum, workspaceId, importOptions) {
+  if (!workspaceId) return [];
+  const index = await getFileChecksumIndex(workspaceId, importOptions);
+  return index.get(checksum) || [];
+}
+async function indexFileForChecksum(file, workspaceId, importOptions) {
+  const checksum = (file.properties || {})['ATML Checksum'];
+  if (!checksum) return;
+  const index = await getFileChecksumIndex(workspaceId, importOptions);
+  const files = index.get(checksum) || [];
+  const existing = files.find((candidate) => candidate.id === file.id);
+  if (existing) {
+    existing.properties = { ...existing.properties, ...file.properties };
+  } else {
+    files.push(file);
+    index.set(checksum, files);
+  }
+}
+async function removeFilesFromChecksumIndex(ids, workspaceId, importOptions) {
+  if (!ids.length) return;
+  const index = await getFileChecksumIndex(workspaceId, importOptions);
+  const removed = new Set(ids);
+  for (const [checksum, files] of index) {
+    const remaining = files.filter((file) => !removed.has(file.id));
+    if (remaining.length) index.set(checksum, remaining);
+    else index.delete(checksum);
+  }
 }
 async function deleteFiles(ids) {
   if (!ids.length) return;
@@ -2490,10 +2577,13 @@ async function updateFileMetadata(fileId, properties) {
     body: JSON.stringify({ replaceExisting: false, properties }),
   });
 }
-async function deleteExistingArtifacts(results, fileIds, sourceFileId) {
+async function deleteExistingArtifacts(results, fileIds, sourceFileId, importOptions, workspaceId) {
   if (results.length) await tmDeleteResults(results.map((result) => result.id));
   const idsToDelete = fileIds.filter((id) => id !== sourceFileId);
-  if (idsToDelete.length) await deleteFiles(idsToDelete);
+  if (idsToDelete.length) {
+    await deleteFiles(idsToDelete);
+    await removeFilesFromChecksumIndex(idsToDelete, workspaceId, importOptions);
+  }
 }
 function assertReplacementPermissions(results, fileIds, sourceFileId, workspaceId) {
   if (results.length && !can(PERM.deleteResult, workspaceId)) {
@@ -2685,7 +2775,7 @@ async function importOneFileLocked(q, opts, workspaceId, text, checksum) {
     // uploaded again unless the user opted to replace.
     const priorResults = await findResultsByChecksum(checksum, workspaceId);
     const fileIdsFromResults = [...new Set(priorResults.flatMap((r) => r.fileIds || []))];
-    const orphanFiles = await findFilesByChecksum(checksum, workspaceId);
+    const orphanFiles = await findFilesByChecksum(checksum, workspaceId, opts);
     const orphanFileIds = orphanFiles.map((file) => file.id).filter(Boolean);
     const existingFileIds = [...new Set([...fileIdsFromResults, ...orphanFileIds])];
 
@@ -2699,8 +2789,9 @@ async function importOneFileLocked(q, opts, workspaceId, text, checksum) {
       await deleteFiles([id]).catch((cleanupError) => console.warn('[import] cleanup after metadata failure failed', cleanupError));
       throw new Error(`File uploaded but its checksum metadata could not be saved: ${e.message}`);
     }
+    await indexFileForChecksum({ id, workspace: workspaceId, properties: { 'ATML Checksum': checksum } }, workspaceId, opts);
     const replaced = existingFileIds.length > 0 && opts.replace;
-    if (replaced) await deleteExistingArtifacts(priorResults, existingFileIds, id);
+    if (replaced) await deleteExistingArtifacts(priorResults, existingFileIds, id, opts, workspaceId);
     return {
       state: replaced ? 'replaced' : 'uploaded',
       detail: `${replaced ? 'Replaced existing file' : 'File uploaded'} (checksum ${checksum.slice(0, 12)}…). No result created.`,
@@ -2710,7 +2801,7 @@ async function importOneFileLocked(q, opts, workspaceId, text, checksum) {
 
   const existingResults = await findResultsByChecksum(checksum, workspaceId);
   const fileIdsFromResults = [...new Set(existingResults.flatMap((r) => r.fileIds || []))];
-  const orphanFiles = await findFilesByChecksum(checksum, workspaceId);
+  const orphanFiles = await findFilesByChecksum(checksum, workspaceId, opts);
   const orphanFileIds = orphanFiles.map((file) => file.id).filter(Boolean);
   const existingFileIds = [...new Set([...fileIdsFromResults, ...orphanFileIds])];
   const hasResult = existingResults.length > 0;
@@ -2751,8 +2842,10 @@ async function importOneFileLocked(q, opts, workspaceId, text, checksum) {
     // an interrupted transfer leaves the result flagged "Incomplete".
     await tmUpdateResultProperties(resultId, { 'ATML Integrity': 'Complete' });
     for (const fid of linkFileIds) {
-      await updateFileMetadata(fid, { 'ATML Checksum': checksum, testResultId: resultId });
+      const properties = { 'ATML Checksum': checksum, testResultId: resultId };
+      await updateFileMetadata(fid, properties);
       updatedMetadata.push({ id: fid, previous: previousFileMetadata.get(fid) });
+      await indexFileForChecksum({ id: fid, workspace: workspaceId, properties }, workspaceId, opts);
     }
   } catch (e) {
     await rollbackFileMetadata(updatedMetadata);
@@ -2763,7 +2856,7 @@ async function importOneFileLocked(q, opts, workspaceId, text, checksum) {
 
   let replaced = false;
   if (replacing) {
-    await deleteExistingArtifacts(existingResults, existingFileIds, fileId);
+    await deleteExistingArtifacts(existingResults, existingFileIds, fileId, opts, workspaceId);
     replaced = true;
   }
 
@@ -2791,7 +2884,7 @@ async function runUpload() {
   $('#upload-ok').disabled = true;
   setImportControlsDisabled(true);
   const DONE_STATES = ['created', 'replaced', 'skipped', 'uploaded'];
-  const opts = { workspaceId: wsId, createResults, replace };
+  const opts = { workspaceId: wsId, createResults, replace, fileChecksumIndexes: new Map() };
 
   // Import with a bounded worker pool so at most POOL_SIZE files are in flight.
   const pending = uploadQueue.filter((q) => !DONE_STATES.includes(q.state));
@@ -2962,7 +3055,10 @@ function init() {
     setDrawerTab(next === $('#dtab-info') ? 'info' : 'data');
   }));
   $('#img-lightbox').addEventListener('click', closeImageLightbox);
-  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') { if (timeControl) timeControl.close(); closeImageLightbox(); closeStepDetails(); closeUploadDrawer(); } });
+  document.addEventListener('keydown', (e) => {
+    trapDrawerFocus(e);
+    if (e.key === 'Escape') { if (timeControl) timeControl.close(); closeImageLightbox(); closeStepDetails(); closeUploadDrawer(); }
+  });
 
   wireUploadDrawer();
 

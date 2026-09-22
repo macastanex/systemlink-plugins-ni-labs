@@ -131,8 +131,9 @@
 
     if (path.endsWith('/search-files') && method === 'POST') {
       const matching = sortedFiles().filter((file) => fileMatchesSearch(file, body.filter));
+      const skip = Math.max(0, Number(body.skip) || 0);
       const take = body.take == null ? 1000 : Number(body.take);
-      return jsonResponse({ availableFiles: matching.slice(0, take < 0 ? matching.length : take).map(publicFile), totalCount: matching.length, continuationToken: null });
+      return jsonResponse({ availableFiles: matching.slice(skip, take < 0 ? matching.length : skip + take).map(publicFile), totalCount: matching.length, continuationToken: null });
     }
 
     if (path.endsWith('/query-files') && method === 'POST') {
