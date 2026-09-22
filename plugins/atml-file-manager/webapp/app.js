@@ -2187,11 +2187,12 @@ function canImportToAnyWorkspace() {
 }
 
 function updateUploadOkDisabled() {
+  const hasReady = uploadQueue.some((q) => q.state === 'ready');
   const anyWrite = canImportToAnyWorkspace();
   const issue = importPermissionIssue();
   const msg = $('#upload-perm-msg');
-  if (msg) { msg.textContent = issue || (!anyWrite ? 'You do not have permission to import these files.' : ''); msg.hidden = !issue && anyWrite; }
-  const hasReady = uploadQueue.some((q) => q.state === 'ready');
+  const permissionIssue = hasReady && (issue || (!anyWrite ? 'You do not have permission to import these files.' : ''));
+  if (msg) { msg.textContent = permissionIssue || ''; msg.hidden = !permissionIssue; }
   $('#upload-ok').disabled = !hasReady || !anyWrite || !!issue;
 }
 
