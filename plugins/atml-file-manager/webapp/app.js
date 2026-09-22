@@ -1347,16 +1347,18 @@ function renderArrayPreview(td, array, name) {
     class: 'array-link', attrs: { type: 'button', title: 'View full array' },
     text: `[${preview}${more}] (${shape})`,
   });
-  link.addEventListener('click', (e) => { e.stopPropagation(); openArrayDialog(array, name); });
+  link.addEventListener('click', (e) => { e.stopPropagation(); openArrayDialog(array, name, e.currentTarget); });
   td.classList.add('has-array');
   td.appendChild(link);
 }
 
-function openArrayDialog(array, name) {
-  const overlay = el('div', { class: 'array-dialog-backdrop' });
-  const dlg = el('div', { class: 'array-dialog' });
+function openArrayDialog(array, name, trigger) {
+  const overlay = el('div', { class: 'array-dialog-backdrop open' });
+  const dlg = el('div', { class: 'array-dialog', attrs: {
+    role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'array-dialog-title', tabindex: '-1',
+  } });
   const head = el('div', { class: 'array-dialog-head' });
-  head.appendChild(el('h3', { text: name || 'Array data' }));
+  head.appendChild(el('h3', { attrs: { id: 'array-dialog-title' }, text: name || 'Array data' }));
   head.appendChild(el('span', { class: 'array-dialog-shape', text: arrayShape(array) }));
   const exportBtn = el('button', { class: 'array-dialog-export', attrs: { type: 'button', title: 'Export to CSV' }, text: 'Export CSV' });
   exportBtn.addEventListener('click', () => downloadCsv(`${sanitizeFileName(name || 'array-data')}.csv`, arrayToCsv(array)));
@@ -1371,12 +1373,19 @@ function openArrayDialog(array, name) {
   body.appendChild(buildArrayTable(array));
   dlg.appendChild(body);
   overlay.appendChild(dlg);
-  const close = () => { overlay.remove(); document.removeEventListener('keydown', onKey); };
-  const onKey = (e) => { if (e.key === 'Escape') close(); };
+  const returnFocus = trigger || document.activeElement;
+  const close = () => {
+    if (!overlay.isConnected) return;
+    overlay.remove();
+    updateApplicationInert();
+    if (returnFocus && returnFocus.isConnected && typeof returnFocus.focus === 'function') returnFocus.focus();
+  };
+  overlay._close = close;
   closeBtn.addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', onKey);
   ($('#theme-provider') || document.body).appendChild(overlay);
+  updateApplicationInert();
+  requestAnimationFrame(() => { if (overlay.isConnected) closeBtn.focus(); });
 }
 
 function buildArrayTable(array) {
@@ -1905,9 +1914,11 @@ function setApplicationInert(inert) {
   }
 }
 function updateApplicationInert() {
-  setApplicationInert(!!document.querySelector('.step-drawer.open, .upload-drawer.open, .img-lightbox.open'));
+  setApplicationInert(!!document.querySelector('.step-drawer.open, .upload-drawer.open, .img-lightbox.open, .array-dialog-backdrop.open'));
 }
 function openModal() {
+  const arrayDialog = document.querySelector('.array-dialog-backdrop.open');
+  if (arrayDialog) return arrayDialog;
   const lightbox = $('#img-lightbox');
   if (lightbox && lightbox.classList.contains('open')) return lightbox;
   return document.querySelector('.step-drawer.open, .upload-drawer.open');
@@ -3043,8 +3054,8 @@ async function refreshAfterImport(importedIds) {
   for (let attempt = 0; attempt < 6; attempt++) {
     await loadFiles();
     if (!wanted.size) return;
-    const present = state.allFiles.some((f) => wanted.has(f.id));
-    if (present) return;
+    const presentIds = new Set(state.allFiles.map((f) => f.id));
+    if ([...wanted].every((id) => presentIds.has(id))) return;
     if (attempt < 5) await new Promise((r) => setTimeout(r, 1000));
   }
 }
@@ -3142,6 +3153,8 @@ function init() {
     trapDrawerFocus(e);
     if (e.key !== 'Escape') return;
     if (timeControl && timeControl.dialog && timeControl.dialog.open) { timeControl.close(); return; }
+    const arrayDialog = document.querySelector('.array-dialog-backdrop.open');
+    if (arrayDialog && arrayDialog._close) { arrayDialog._close(); return; }
     if ($('#img-lightbox').classList.contains('open')) { closeImageLightbox(); return; }
     if ($('#upload-drawer').classList.contains('open')) { closeUploadDrawer(); return; }
     if ($('#step-drawer').classList.contains('open')) closeStepDetails();

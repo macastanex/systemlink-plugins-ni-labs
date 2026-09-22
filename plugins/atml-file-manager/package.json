@@ -14,5 +14,8 @@
     "sbom": "node -e \"require('fs').mkdirSync('sbom',{recursive:true})\" && npm run sbom:cyclonedx && npm run sbom:spdx",
     "sbom:cyclonedx": "npm sbom --sbom-format cyclonedx --sbom-type application > sbom/ATMLFileManager.cyclonedx.json",
     "sbom:spdx": "npm sbom --sbom-format spdx --sbom-type application > sbom/ATMLFileManager.spdx.json"
+  },
+  "dependencies": {
+    "@ni/nimble-components": "35.13.1"
   }
 }
