@@ -2137,7 +2137,7 @@ function closeUploadDrawer() {
 // (reusing the File Service copy) so the user can import what they're looking at.
 function openImport() {
   if (!openUploadDrawer()) return;
-  if (state.currentFormat === 'atml' && state.currentFile && state.currentRawText) {
+  if (state.view === 'viewer' && state.currentFormat === 'atml' && state.currentFile && state.currentRawText) {
     const entry = addServiceFile(state.currentFile, state.currentRawText);
     const wsSel = $('#upload-workspace');
     if (entry.workspace && wsSel) wsSel.value = entry.workspace;
@@ -2151,11 +2151,15 @@ function isXmlFile(file) {
   return /\.(xml|atml)$/i.test(file.name) || file.type === 'text/xml' || file.type === 'application/xml';
 }
 
+function localFileKey(file) {
+  return JSON.stringify([file.name, file.size, file.type, file.lastModified, file.webkitRelativePath || '']);
+}
+
 function addUploadFiles(fileList) {
   let added = 0;
   for (const file of Array.from(fileList)) {
     if (!isXmlFile(file)) continue;
-    const key = file;
+    const key = `local:${localFileKey(file)}`;
     const existing = uploadQueue.find((q) => q.key === key);
     if (existing) {
       // Re-selecting an already-listed file resets it to Ready so it can be
