@@ -114,9 +114,10 @@ To submit an existing release without rebuilding a plugin in this repository, ru
 same workflow manually with `release_tag` set. The release must contain exactly one
 CycloneDX SBOM (`*.cyclonedx.json`) and one SPDX SBOM (`*.spdx.json`) in addition to
 the `.nipkg`. The workflow downloads the only `.nipkg` asset from that release, or
-uses `artifact_name` when the release contains multiple `.nipkg` assets, verifies its
-SHA256, and dispatches the submission PR. You can also provide the 40-character build
-commit as `source_commit` for provenance.
+verifies its SHA256, and dispatches the submission PR. Releases with multiple `.nipkg`
+assets are rejected because a single SBOM pair cannot reliably identify which package
+it describes. You can also provide the 40-character build commit as `source_commit`
+for provenance.
 
 ## Tag convention
 
