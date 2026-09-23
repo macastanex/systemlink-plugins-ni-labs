@@ -2100,7 +2100,6 @@ function initTheme() {
 
 /* ---------- File upload slide-out ---------- */
 const uploadQueue = [];   // [{ file, state: 'ready'|'uploading'|'done'|'error', id, error }]
-const uploadKeys = new Set();   // name+size keys for O(1) de-duplication
 let importRunning = false;   // true while a run is in progress (locks remove buttons)
 
 function openUploadDrawer() {
@@ -2108,7 +2107,6 @@ function openUploadDrawer() {
   state.uploadDrawerReturnFocus = document.activeElement;
   // Start each import session fresh — clear any previously listed files.
   uploadQueue.length = 0;
-  uploadKeys.clear();
   $('#upload-rows').innerHTML = '';
   hideUploadProgress();
   renderUploadRows();
@@ -2157,7 +2155,7 @@ function addUploadFiles(fileList) {
   let added = 0;
   for (const file of Array.from(fileList)) {
     if (!isXmlFile(file)) continue;
-    const key = `${file.name}\u0000${file.size}`;
+    const key = file;
     const existing = uploadQueue.find((q) => q.key === key);
     if (existing) {
       // Re-selecting an already-listed file resets it to Ready so it can be
@@ -2166,7 +2164,6 @@ function addUploadFiles(fileList) {
       added++;
       continue;
     }
-    uploadKeys.add(key);
     uploadQueue.push({ key, file, state: 'ready', detail: '', fileId: null, resultId: null });
     added++;
   }
@@ -2190,7 +2187,7 @@ function addServiceFile(file, text) {
   };
   const existing = uploadQueue.find((q) => q.key === key);
   if (existing) Object.assign(existing, entry);
-  else { uploadKeys.add(key); uploadQueue.push(entry); }
+  else uploadQueue.push(entry);
   renderUploadRows();
   return entry;
 }
@@ -2229,7 +2226,6 @@ function removeQueueEntry(q) {
   if (importRunning) return;
   const i = uploadQueue.indexOf(q);
   if (i >= 0) uploadQueue.splice(i, 1);
-  uploadKeys.delete(q.key);
   if (q._tr) q._tr.remove();
   updateUploadOkDisabled();
 }
@@ -2276,17 +2272,12 @@ function effectiveImportWorkspace(q, fallbackWorkspace) {
 // permissions in the effective workspace for any queued file.
 function importPermissionIssue() {
   const createResults = $('#opt-create-results').checked;
-  const replace = $('#opt-replace-existing').checked;
   const selectedWorkspace = $('#upload-workspace').value;
   const ready = uploadQueue.filter((q) => q.state === 'ready');
   for (const q of ready) {
     const ws = effectiveImportWorkspace(q, selectedWorkspace);
     if (!q.serviceFileId && !can(PERM.uploadFile, ws)) return 'You do not have permission to upload one or more files to the selected workspace.';
     if (createResults && !can(PERM.createResult, ws)) return 'You do not have permission to create test results for one or more files.';
-    if (replace) {
-      if (!can(PERM.deleteFile, ws)) return 'You do not have permission to replace (delete) one or more files.';
-      if (createResults && !can(PERM.deleteResult, ws)) return 'You do not have permission to replace (delete) one or more results.';
-    }
   }
   return null;
 }
@@ -2297,15 +2288,12 @@ function canImportToAnyWorkspace() {
   const ids = Object.keys(state.workspaceNames || {});
   if (!state.authStatements || !ids.length) return true;
   const createResults = $('#opt-create-results').checked;
-  const replace = $('#opt-replace-existing').checked;
   const selectedWorkspace = $('#upload-workspace').value;
   const ready = uploadQueue.filter((q) => q.state === 'ready');
   return ready.some((q) => {
     const ws = effectiveImportWorkspace(q, selectedWorkspace);
     return (q.serviceFileId || can(PERM.uploadFile, ws))
-      && (!createResults || can(PERM.createResult, ws))
-      && (!replace || can(PERM.deleteFile, ws))
-      && (!replace || !createResults || can(PERM.deleteResult, ws));
+      && (!createResults || can(PERM.createResult, ws));
   });
 }
 
