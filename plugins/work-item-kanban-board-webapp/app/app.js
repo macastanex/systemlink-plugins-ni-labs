@@ -1342,9 +1342,10 @@ async function saveDrawerChanges() {
 
     const currentItem = allWorkItems.find(workItem => workItem.id === itemId);
     const currentVersion = getWorkItemVersion(currentItem);
-    const hasVersionConflict = currentItem
-        && drawerOriginalUpdatedAt !== null
-        && currentVersion !== drawerOriginalUpdatedAt;
+    const hasVersionConflict = !currentItem || (
+        drawerOriginalUpdatedAt !== null
+        && currentVersion !== drawerOriginalUpdatedAt
+    );
     const hasPropertyConflict = currentItem
         && propsChanged
         && getPropertiesSnapshot(currentItem.properties) !== drawerOriginalPropertiesSnapshot;
