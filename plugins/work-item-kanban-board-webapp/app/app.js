@@ -1331,7 +1331,7 @@ async function saveDrawerChanges() {
     }
     if (propsChanged) {
         // Replace the key-value pair field so removed properties are deleted by omission.
-        updates.properties = newProperties;
+        updates.properties = Object.keys(newProperties).length > 0 ? newProperties : null;
         changed = true;
     }
 
