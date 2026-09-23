@@ -249,11 +249,16 @@ async function queryWorkspaceXml(workspaceId) {
   let skip = 0;
   let total = null;
   while (total === null || skip < total) {
-    const body = { take: SERVER_PAGE, skip, orderBy: 'createdTime', orderByDescending: true };
-    const res = await apiGet(`${FILE_API}/service-groups/Default/query-files?workspace=${encodeURIComponent(workspaceId)}`, {
+    const query = new URLSearchParams({
+      workspace: workspaceId,
+      skip: String(skip),
+      take: String(SERVER_PAGE),
+      orderBy: 'createdTime',
+      orderByDescending: 'true',
+    });
+    const res = await apiGet(`${FILE_API}/service-groups/Default/query-files?${query}`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
     });
     const data = await res.json();
     const items = data.availableFiles || data.files || data.value || [];
@@ -2564,10 +2569,16 @@ async function buildFileChecksumIndex(workspaceId) {
   let skip = 0;
   let total = null;
   while (total === null || skip < total) {
-    const res = await apiGet(`${FILE_API}/service-groups/Default/query-files?workspace=${encodeURIComponent(workspaceId)}`, {
+    const query = new URLSearchParams({
+      workspace: workspaceId,
+      skip: String(skip),
+      take: String(SERVER_PAGE),
+      orderBy: 'updated',
+      orderByDescending: 'true',
+    });
+    const res = await apiGet(`${FILE_API}/service-groups/Default/query-files?${query}`, {
       method: 'POST',
       headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ take: SERVER_PAGE, skip, orderBy: 'updated', orderByDescending: true }),
     });
     const data = await res.json();
     const page = data.availableFiles || data.files || data.value || [];

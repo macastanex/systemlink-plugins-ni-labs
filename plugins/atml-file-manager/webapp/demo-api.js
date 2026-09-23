@@ -139,8 +139,8 @@
     if (path.endsWith('/query-files') && method === 'POST') {
       const workspace = url.searchParams.get('workspace');
       const matching = sortedFiles().filter((file) => !workspace || file.workspace === workspace);
-      const skip = Number(body.skip) || 0;
-      const take = Number(body.take) || 1000;
+      const skip = Number(url.searchParams.get('skip')) || 0;
+      const take = Number(url.searchParams.get('take')) || 1000;
       return jsonResponse({ availableFiles: matching.slice(skip, skip + take).map(publicFile), totalCount: matching.length });
     }
 
