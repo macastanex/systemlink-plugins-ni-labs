@@ -531,6 +531,9 @@ function getWorkItemQueryFilter() {
     if (createdRange?.start) {
         filters.push(`createdAt >= ${quoteFilterValue(createdRange.start.toISOString())}`);
     }
+    if (createdRange?.end) {
+        filters.push(`createdAt <= ${quoteFilterValue(createdRange.end.toISOString())}`);
+    }
 
     const workspaceValues = [...getMsSelected('workspace')];
     if (workspaceValues.length > 0) {
@@ -836,8 +839,7 @@ function createCard(item) {
     const card = document.createElement('div');
     card.className = `kanban-card type-${item.type || 'unknown'} ${cardViewMode === CARD_VIEW_MODES.expanded ? 'expanded' : 'compressed'}`;
     card.draggable = true;
-    card.tabIndex = 0;
-    card.setAttribute('role', 'button');
+    card.setAttribute('role', 'group');
     card.dataset.workItemId = item.id;
     card.dataset.state = item.state;
 
@@ -894,7 +896,7 @@ function createCard(item) {
         : '';
 
     card.innerHTML = `
-        <div class="card-title">${escapeHtml(item.name || 'Untitled')}</div>
+        <button type="button" class="card-title card-open-button" aria-label="Open details for ${escapeAttr(item.name || 'Untitled')}">${escapeHtml(item.name || 'Untitled')}</button>
         ${!isPreScheduled && !hasScheduleDates
             ? `<span class="card-unscheduled" title="Not yet scheduled">Unscheduled</span>` : ''}
         ${expandedDetails}
@@ -912,22 +914,16 @@ function createCard(item) {
     card.addEventListener('click', (e) => {
         if (card.classList.contains('dragging')) return;
         if (card.classList.contains('inline-editing')) return;
-        if (e.target instanceof Element && e.target.closest('a, button, input, nimble-select, nimble-text-field')) return;
+        const interactiveTarget = e.target instanceof Element
+            ? e.target.closest('a, button, input, nimble-select, nimble-text-field')
+            : null;
+        if (interactiveTarget && !interactiveTarget.classList.contains('card-open-button')) return;
         if (e.detail > 1) return;
         drawerOpenTimer = window.setTimeout(() => {
             drawerOpenTimer = null;
             if (!card.isConnected || card.classList.contains('dragging') || card.classList.contains('inline-editing')) return;
             openDrawer(item);
         }, CARD_CLICK_DELAY);
-    });
-
-    card.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        if (e.defaultPrevented) return;
-        if (e.target !== card && e.target instanceof Element && e.target.closest('a, button, input, nimble-select, nimble-text-field')) return;
-        window.clearTimeout(drawerOpenTimer);
-        e.preventDefault();
-        openDrawer(item);
     });
 
     // Inline edit: double-click title
@@ -1244,7 +1240,8 @@ function closeDrawer() {
     } else {
         const cardToFocus = [...document.querySelectorAll('.kanban-card')]
             .find(card => card.dataset.workItemId === lastFocusedWorkItemId)
-            || document.querySelector('.kanban-card');
+            ?.querySelector('.card-open-button')
+            || document.querySelector('.kanban-card .card-open-button');
         (cardToFocus || kanbanBoard || refreshBtn).focus();
     }
     lastFocusedElement = null;

@@ -298,13 +298,13 @@ nimble-theme-provider[theme="color"] .trc-dialog,
       if (dialog.open) { close(); return; }
       applyThemeClass();
       const now = new Date();
-      const fallbackStart = relativeStart(state.value, now) || new Date(now.getTime() - 30 * 864e5);
-      const startDate = (state.custom && state.custom.start) || fallbackStart;
-      const endDate = (state.custom && state.custom.end) || now;
-      startText.value = formatFieldValue(startDate);
-      endText.value = formatFieldValue(endDate);
-      startNative.value = formatDateTimeLocal(startDate);
-      endNative.value = formatDateTimeLocal(endDate);
+      const presetStart = relativeStart(state.value, now);
+      const startDate = (state.custom && state.custom.start) || presetStart;
+      const endDate = (state.custom && state.custom.end) || (presetStart ? now : null);
+      startText.value = startDate ? formatFieldValue(startDate) : '';
+      endText.value = endDate ? formatFieldValue(endDate) : '';
+      startNative.value = startDate ? formatDateTimeLocal(startDate) : '';
+      endNative.value = endDate ? formatDateTimeLocal(endDate) : '';
       errBox.hidden = true;
       updateQuickState();
       dialog.show();
@@ -337,6 +337,10 @@ nimble-theme-provider[theme="color"] .trc-dialog,
     }
     function applyCustom(e) {
       if (e) e.preventDefault();
+      if (state.mode === 'preset' && state.value === 'all' && !startText.value.trim() && !endText.value.trim()) {
+        close();
+        return;
+      }
       const start = parseFieldValue(startText.value);
       const end = parseFieldValue(endText.value);
       if (!start || !end) { errBox.textContent = 'Please enter a valid time range.'; errBox.hidden = false; return; }

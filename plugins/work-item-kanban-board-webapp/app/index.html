@@ -11,7 +11,9 @@
         // the host instance serves the URL.
         (function () {
             var path = location.pathname;
-            if (path.charAt(path.length - 1) !== '/') {
+            if (path.endsWith('/index.html')) {
+                path = path.slice(0, -'index.html'.length);
+            } else if (path.charAt(path.length - 1) !== '/') {
                 path += '/';
             }
             var base = document.createElement('base');
@@ -30,6 +32,10 @@
 <nimble-theme-provider id="theme">
     <div class="container">
         <header>
+            <div class="header-title">
+                <h1>Work Item Kanban Board</h1>
+                <p class="subtitle">Track work items across lifecycle states.</p>
+            </div>
             <div class="header-row">
                 <div class="header-filters">
                     <div id="workspaceMsMount"></div>

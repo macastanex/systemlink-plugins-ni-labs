@@ -311,7 +311,7 @@
     let allCheckbox = null;
     function ensureAllOption() {
       if (panel.querySelector('.msc-all-option-row')) return;
-      const row = elem('label', { class: 'msc-all-option-row' });
+      const row = elem('div', { class: 'msc-all-option-row' });
       allCheckbox = createCheckbox('msc-all-option', allLabel, false);
       allCheckbox.addEventListener('change', () => {
         if (allCheckbox.checked) {
