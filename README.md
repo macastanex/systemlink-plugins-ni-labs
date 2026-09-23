@@ -113,7 +113,7 @@ npm run submission-manifest --workspace @ni-kismet/ni-labs-welcome
 To submit an existing release without rebuilding a plugin in this repository, run the
 same workflow manually with `release_tag` set. The release must contain exactly one
 CycloneDX SBOM (`*.cyclonedx.json`) and one SPDX SBOM (`*.spdx.json`) in addition to
-the `.nipkg`. The workflow downloads the only `.nipkg` asset from that release, or
+the `.nipkg`. The workflow downloads the only `.nipkg` asset from that release,
 verifies its SHA256, and dispatches the submission PR. Releases with multiple `.nipkg`
 assets are rejected because a single SBOM pair cannot reliably identify which package
 it describes. You can also provide the 40-character build commit as `source_commit`
