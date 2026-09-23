@@ -128,15 +128,19 @@ jobs:
         working-directory: ${{ matrix.path }}
         run: |
           if gh release view "${{ matrix.tag }}" >/dev/null 2>&1; then
-            gh release view "${{ matrix.tag }}" --json assets --jq \
-              '.assets[].name | select(test("\\.(cyclonedx|spdx)\\.json$"))' |
-              while IFS= read -r asset; do
-                gh release delete-asset "${{ matrix.tag }}" "$asset" --yes
-              done
             gh release upload "${{ matrix.tag }}" \
               "${{ steps.artifacts.outputs.nipkg_path }}" \
               sbom/*.cyclonedx.json sbom/*.spdx.json \
               --clobber
+            CYCLONEDX_NAME=$(basename sbom/*.cyclonedx.json)
+            SPDX_NAME=$(basename sbom/*.spdx.json)
+            gh release view "${{ matrix.tag }}" --json assets --jq \
+              '.assets[].name | select(test("\\.(cyclonedx|spdx)\\.json$"))' |
+              while IFS= read -r asset; do
+                if [ "$asset" != "$CYCLONEDX_NAME" ] && [ "$asset" != "$SPDX_NAME" ]; then
+                  gh release delete-asset "${{ matrix.tag }}" "$asset" --yes
+                fi
+              done
           else
             gh release create "${{ matrix.tag }}" \
               "${{ steps.artifacts.outputs.nipkg_path }}" \

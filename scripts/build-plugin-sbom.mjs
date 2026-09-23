@@ -68,7 +68,9 @@ for (const [format, filename] of formats) {
     const rootPackageId = documentRelationship.relatedSpdxElement;
     sbom.name = `${packageName}@${packageJson.version}`;
     sbom.documentNamespace = `http://spdx.org/spdxdocs/${encodeURIComponent(packageName)}-${packageJson.version}-${randomUUID()}`;
+    pluginPackage.primaryPackagePurpose = 'APPLICATION';
     sbom.packages = sbom.packages.filter((pkg) => pkg.SPDXID !== rootPackageId);
+    sbom.documentDescribes = [pluginPackage.SPDXID];
     sbom.relationships = sbom.relationships.filter(
       (relationship) => relationship.spdxElementId !== rootPackageId && relationship.relatedSpdxElement !== rootPackageId
     );
