@@ -178,6 +178,7 @@ let demoWorkItems = null;
 let workItemsLoadId = 0;
 let drawerSessionId = 0;
 let drawerSaveInProgress = false;
+const workItemSaveTokens = new Map();
 let lastFocusedElement = null;
 let lastFocusedWorkItemId = null;
 let drawerOriginalUpdatedAt = null;
@@ -1356,8 +1357,14 @@ async function saveDrawerChanges() {
 
     drawerSaveInProgress = true;
     drawerSaveBtn.setAttribute('disabled', '');
+    const saveToken = Symbol(itemId);
+    workItemSaveTokens.set(itemId, saveToken);
     try {
-        const data = await persistWorkItemUpdates([updates], { replace: propsChanged });
+        const data = await persistWorkItemUpdates([updates], { replace: removedPropertyKeys.length > 0 });
+        if (workItemSaveTokens.get(itemId) !== saveToken) {
+            return;
+        }
+
         if (data?.updatedWorkItems?.length > 0) {
             const updated = data.updatedWorkItems[0];
             const idx = allWorkItems.findIndex(w => w.id === itemId);
@@ -1380,6 +1387,9 @@ async function saveDrawerChanges() {
         console.error('Failed to save work item:', err);
         showError(`Failed to save: ${err.message}`);
     } finally {
+        if (workItemSaveTokens.get(itemId) === saveToken) {
+            workItemSaveTokens.delete(itemId);
+        }
         if (drawerSessionId === saveSessionId) {
             drawerSaveInProgress = false;
             drawerSaveBtn.removeAttribute('disabled');
