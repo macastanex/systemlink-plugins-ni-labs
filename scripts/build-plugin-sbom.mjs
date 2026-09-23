@@ -51,6 +51,7 @@ for (const [format, filename] of formats) {
       throw new Error(`CycloneDX output does not contain the plugin component: ${pluginRef}`);
     }
     const rootRef = sbom.metadata.component?.['bom-ref'];
+    sbom.components = sbom.components.filter((component) => component['bom-ref'] !== pluginRef);
     sbom.dependencies = sbom.dependencies?.filter((dependency) => dependency.ref !== rootRef);
     sbom.metadata.component = { ...pluginComponent, type: 'application' };
   } else {

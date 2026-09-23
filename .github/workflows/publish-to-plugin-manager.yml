@@ -229,9 +229,9 @@ jobs:
             ARTIFACT_NAME=$(jq -r '[.assets[] | select(.name | test("^[A-Za-z0-9][A-Za-z0-9._-]*[.]nipkg$")) | .name] | .[0]' <<<"$RELEASE_JSON")
           fi
 
-          CYCLODEX_COUNT=$(jq '[.assets[] | select(.name | test("[.]cyclonedx[.]json$"))] | length' <<<"$RELEASE_JSON")
+          CYCLONEDX_COUNT=$(jq '[.assets[] | select(.name | test("[.]cyclonedx[.]json$"))] | length' <<<"$RELEASE_JSON")
           SPDX_COUNT=$(jq '[.assets[] | select(.name | test("[.]spdx[.]json$"))] | length' <<<"$RELEASE_JSON")
-          if [ "$CYCLODEX_COUNT" -ne 1 ] || [ "$SPDX_COUNT" -ne 1 ]; then
+          if [ "$CYCLONEDX_COUNT" -ne 1 ] || [ "$SPDX_COUNT" -ne 1 ]; then
             echo "Release $RELEASE_TAG must contain exactly one CycloneDX and one SPDX SBOM asset before submission." >&2
             echo 'Build a new release with this workflow; SBOMs cannot be reconstructed safely from a .nipkg alone.' >&2
             exit 1
