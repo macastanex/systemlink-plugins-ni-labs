@@ -2437,6 +2437,19 @@ function stepByteSize(step) {
   return _bodyEncoder.encode(JSON.stringify(step)).length;
 }
 
+function responseFailure(payload) {
+  if (!payload) return null;
+  const failed = payload.failed;
+  const hasFailed = failed === true
+    || (typeof failed === 'number' && failed > 0)
+    || (typeof failed === 'string' && failed !== '' && failed !== '0' && failed.toLowerCase() !== 'false')
+    || (Array.isArray(failed) && failed.length > 0)
+    || (failed && typeof failed === 'object');
+  if (!payload.error && !hasFailed) return null;
+  const detail = typeof payload.error === 'string' ? payload.error : payload.error && payload.error.message;
+  return detail || (hasFailed ? 'The server reported a partial failure.' : 'The server reported an error.');
+}
+
 // Split a list of steps into batches whose serialized body stays under the byte
 // budget (and the count cap). Each step's true byte size plus its array-comma
 // and the fixed wrapper are summed so the assembled POST body never exceeds the
@@ -2465,7 +2478,9 @@ function chunkSteps(list) {
 // retry each so the budget self-corrects without failing the whole import.
 async function postStepBatch(batch, isLast) {
   try {
-    await tmPost('steps', { steps: batch, updateResultTotalTime: isLast });
+    const data = await tmPost('steps', { steps: batch, updateResultTotalTime: isLast });
+    const failure = responseFailure(data);
+    if (failure) throw new Error(`Step upload was incomplete: ${failure}`);
   } catch (err) {
     const tooLarge = err && (err.status === 413 || /body size|too large|request entity/i.test(err.detail || err.message || ''));
     if (tooLarge && batch.length > 1) {
@@ -2636,10 +2651,12 @@ async function removeFilesFromChecksumIndex(ids, workspaceId, importOptions) {
 }
 async function deleteFiles(ids) {
   if (!ids.length) return;
-  await apiGet(`${FILE_API}/service-groups/Default/delete-files`, {
+  const res = await apiGet(`${FILE_API}/service-groups/Default/delete-files`, {
     method: 'POST', headers: { Accept: 'application/json', 'Content-Type': 'application/json' },
     body: JSON.stringify({ ids }),
   });
+  const failure = responseFailure(await res.json().catch(() => null));
+  if (failure) throw new Error(`File deletion was incomplete: ${failure}`);
 }
 async function updateFileMetadata(fileId, properties) {
   await apiGet(`${FILE_API}/service-groups/Default/files/${encodeURIComponent(fileId)}/update-metadata`, {
