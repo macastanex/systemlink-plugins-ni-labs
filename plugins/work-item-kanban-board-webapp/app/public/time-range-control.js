@@ -206,10 +206,7 @@ nimble-theme-provider[theme="color"] .trc-dialog,
     const label = btn.querySelector('.trc-label');
 
     // ----- dialog -----
-    const dialog = elem('dialog', { class: 'trc-dialog' });
-    const quickButtons = order.map((key) =>
-      `<button class="trc-quick-btn" data-range="${key}" type="button">${presets[key]}</button>`
-    ).join('');
+    const dialog = elem('dialog', { class: 'trc-dialog', 'aria-label': options.label || 'Select time range' });
     // The apply button can render as a Nimble outline button (opts.nimble) or a
     // plain styled button. Either way it is type="button" and wired via click;
     // the form's submit handler covers the Enter key inside the text fields.
@@ -244,7 +241,7 @@ nimble-theme-provider[theme="color"] .trc-dialog,
           </div>
           <aside class="trc-quick" aria-label="Quick ranges">
             <div class="trc-title">Quick ranges</div>
-            <div class="trc-quick-list">${quickButtons}</div>
+            <div class="trc-quick-list"></div>
           </aside>
         </div>
       </form>`;
@@ -257,6 +254,12 @@ nimble-theme-provider[theme="color"] .trc-dialog,
     const startNative = dialog.querySelector('.trc-start-native');
     const endNative = dialog.querySelector('.trc-end-native');
     const errBox = dialog.querySelector('.trc-err');
+    const quickList = dialog.querySelector('.trc-quick-list');
+    for (const key of order) {
+      const quickButton = elem('button', { class: 'trc-quick-btn', 'data-range': key, type: 'button' });
+      quickButton.textContent = presets[key];
+      quickList.appendChild(quickButton);
+    }
 
     function applyThemeClass() {
       const tp = btn.closest('nimble-theme-provider');
@@ -284,7 +287,7 @@ nimble-theme-provider[theme="color"] .trc-dialog,
     function position() {
       const margin = 12;
       const triggerRect = btn.getBoundingClientRect();
-      dialog.style.maxWidth = `${Math.max(320, window.innerWidth - margin * 2)}px`;
+      dialog.style.maxWidth = `${Math.max(0, window.innerWidth - margin * 2)}px`;
       const rect = dialog.getBoundingClientRect();
       const left = Math.min(Math.max(triggerRect.left, margin), Math.max(margin, window.innerWidth - rect.width - margin));
       const top = Math.min(Math.max(triggerRect.bottom + 6, margin), Math.max(margin, window.innerHeight - rect.height - margin));
@@ -311,6 +314,7 @@ nimble-theme-provider[theme="color"] .trc-dialog,
     function close() {
       if (dialog.open) dialog.close();
       btn.setAttribute('aria-expanded', 'false');
+      btn.focus();
     }
     function emit() {
       onChange(computeRange(), { mode: state.mode, value: state.value, custom: state.custom });
@@ -358,6 +362,12 @@ nimble-theme-provider[theme="color"] .trc-dialog,
     dialog.querySelector('.trc-apply, .trc-apply-nimble').addEventListener('click', applyCustom);
     form.addEventListener('submit', applyCustom);
     dialog.addEventListener('cancel', close);
+    dialog.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+      }
+    });
     document.addEventListener('mousedown', onPointerDown);
     window.addEventListener('resize', onViewport);
     window.addEventListener('scroll', onViewport, true);

@@ -50,6 +50,7 @@
                         <nimble-icon-arrow-up-left-and-arrow-down-right id="cardViewToggleIcon" slot="start"></nimble-icon-arrow-up-left-and-arrow-down-right>
                         Toggle card detail density
                     </nimble-button>
+                    <span id="demoModeBadge" class="demo-mode-badge" hidden>Demo data</span>
                 </div>
             </div>
         </header>
@@ -64,55 +65,55 @@
             <span class="legend-item type-transportorder">Transport Order</span>
         </div>
 
-        <div id="boardLoading" class="board-loading">
+        <div id="boardLoading" class="board-loading" role="status" aria-live="polite">
             <nimble-spinner></nimble-spinner>
             <span>Loading work items...</span>
         </div>
 
-        <div id="kanbanBoard" class="kanban-board" hidden>
-            <div class="kanban-column" data-state="NEW">
+        <div id="kanbanBoard" class="kanban-board" hidden aria-label="Work item board" tabindex="-1">
+            <div class="kanban-column" data-state="NEW" aria-label="New work items">
                 <div class="column-header new-header">
                     <span class="column-title">New</span>
                     <span class="column-count" id="count-NEW">0</span>
                 </div>
                 <div class="column-body" id="col-NEW"></div>
             </div>
-            <div class="kanban-column" data-state="DEFINED">
+            <div class="kanban-column" data-state="DEFINED" aria-label="Defined work items">
                 <div class="column-header defined-header">
                     <span class="column-title">Defined</span>
                     <span class="column-count" id="count-DEFINED">0</span>
                 </div>
                 <div class="column-body" id="col-DEFINED"></div>
             </div>
-            <div class="kanban-column" data-state="REVIEWED">
+            <div class="kanban-column" data-state="REVIEWED" aria-label="Reviewed work items">
                 <div class="column-header reviewed-header">
                     <span class="column-title">Reviewed</span>
                     <span class="column-count" id="count-REVIEWED">0</span>
                 </div>
                 <div class="column-body" id="col-REVIEWED"></div>
             </div>
-            <div class="kanban-column" data-state="SCHEDULED">
+            <div class="kanban-column" data-state="SCHEDULED" aria-label="Scheduled work items">
                 <div class="column-header scheduled-header">
                     <span class="column-title">Scheduled</span>
                     <span class="column-count" id="count-SCHEDULED">0</span>
                 </div>
                 <div class="column-body" id="col-SCHEDULED"></div>
             </div>
-            <div class="kanban-column" data-state="IN_PROGRESS">
+            <div class="kanban-column" data-state="IN_PROGRESS" aria-label="In progress work items">
                 <div class="column-header inprogress-header">
                     <span class="column-title">In Progress</span>
                     <span class="column-count" id="count-IN_PROGRESS">0</span>
                 </div>
                 <div class="column-body" id="col-IN_PROGRESS"></div>
             </div>
-            <div class="kanban-column" data-state="PENDING_APPROVAL">
+            <div class="kanban-column" data-state="PENDING_APPROVAL" aria-label="Pending approval work items">
                 <div class="column-header pending-header">
                     <span class="column-title">Pending Approval</span>
                     <span class="column-count" id="count-PENDING_APPROVAL">0</span>
                 </div>
                 <div class="column-body" id="col-PENDING_APPROVAL"></div>
             </div>
-            <div class="kanban-column" data-state="CLOSED">
+            <div class="kanban-column" data-state="CLOSED" aria-label="Closed work items">
                 <div class="column-header closed-header">
                     <span class="column-title">Closed</span>
                     <span class="column-count" id="count-CLOSED">0</span>
@@ -126,7 +127,7 @@
     <!-- Detail drawer -->
     <div id="detailDrawer" class="detail-drawer" hidden>
         <div class="drawer-backdrop" id="drawerBackdrop"></div>
-        <div class="drawer-panel">
+        <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawerTitle" tabindex="-1">
             <div class="drawer-header">
                 <div class="drawer-heading">
                     <h2 id="drawerTitle">Work Item</h2>

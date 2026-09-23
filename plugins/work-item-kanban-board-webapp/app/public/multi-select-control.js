@@ -212,6 +212,7 @@
 `;
 
   const SEARCH_SVG = '<svg class="msc-search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>';
+  let instanceCount = 0;
 
   function injectStyles() {
     if (document.getElementById(STYLE_ID)) return;
@@ -283,11 +284,12 @@
       lbl.textContent = options.label;
       wrap.appendChild(lbl);
     }
-    const btn = elem('button', { type: 'button', class: 'msc-btn', 'aria-haspopup': 'listbox', 'aria-expanded': 'false', 'aria-label': ariaLabel });
+    const panelId = `msc-panel-${++instanceCount}`;
+    const btn = elem('button', { type: 'button', class: 'msc-btn', 'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': panelId, 'aria-label': ariaLabel });
     btn.innerHTML = '<span class="msc-value"></span><span class="msc-caret" aria-hidden="true"></span>';
     const valueEl = btn.querySelector('.msc-value');
     wrap.appendChild(btn);
-    const panel = elem('div', { class: 'msc-panel' });
+    const panel = elem('div', { class: 'msc-panel', id: panelId, role: 'group', 'aria-label': `${ariaLabel} options` });
     panel.hidden = true;
     wrap.appendChild(panel);
 
@@ -339,6 +341,12 @@
       allCheckbox.indeterminate = false;
     }
 
+    function canonicalizeSelection() {
+      if (labels.size === 0 || selected.size !== labels.size) return;
+      selected.clear();
+      for (const cb of panel.querySelectorAll('.msc-option')) cb.checked = false;
+    }
+
     function filterOptions(query) {
       const q = (query || '').trim().toLowerCase();
       for (const cb of panel.querySelectorAll('.msc-option')) {
@@ -359,6 +367,7 @@
       cb.addEventListener('change', () => {
         if (cb.checked) selected.add(value);
         else selected.delete(value);
+        canonicalizeSelection();
         updateAllOption();
         updateButton();
         emit();
@@ -421,6 +430,7 @@
       for (const cb of panel.querySelectorAll('.msc-option')) {
         cb.checked = selected.has(cb.getAttribute('data-value'));
       }
+      canonicalizeSelection();
       updateButton();
     }
 
@@ -442,6 +452,7 @@
         if (preserve && prev.has(value)) selected.add(value);
         addOption(value, label);
       });
+      canonicalizeSelection();
       updateButton();
       if (searchInput) filterOptions(searchInput.value);
     }
