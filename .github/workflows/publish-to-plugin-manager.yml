@@ -73,6 +73,9 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Pin npm version
+        run: npm install --global npm@11.6.2
+
       - name: Install dependencies
         run: npm ci
 
@@ -87,6 +90,10 @@ jobs:
       - name: Package plugin
         working-directory: ${{ matrix.path }}
         run: npm run package
+
+      - name: Generate SBOMs
+        working-directory: ${{ matrix.path }}
+        run: node ../../scripts/build-plugin-sbom.mjs .
 
       - name: Build thin submission manifest
         id: submission_manifest
@@ -106,6 +113,12 @@ jobs:
             echo 'No .nipkg artifact found' >&2
             exit 1
           fi
+          for sbom in sbom/*.cyclonedx.json sbom/*.spdx.json; do
+            if [ ! -f "$sbom" ]; then
+              echo "Missing SBOM artifact: $sbom" >&2
+              exit 1
+            fi
+          done
           echo "nipkg_path=$NIPKG_PATH" >> "$GITHUB_OUTPUT"
           echo "nipkg_name=$(basename "$NIPKG_PATH")" >> "$GITHUB_OUTPUT"
 
@@ -115,10 +128,19 @@ jobs:
         working-directory: ${{ matrix.path }}
         run: |
           if gh release view "${{ matrix.tag }}" >/dev/null 2>&1; then
-            gh release upload "${{ matrix.tag }}" "${{ steps.artifacts.outputs.nipkg_path }}" --clobber
+            gh release view "${{ matrix.tag }}" --json assets --jq \
+              '.assets[].name | select(test("\\.(cyclonedx|spdx)\\.json$"))' |
+              while IFS= read -r asset; do
+                gh release delete-asset "${{ matrix.tag }}" "$asset" --yes
+              done
+            gh release upload "${{ matrix.tag }}" \
+              "${{ steps.artifacts.outputs.nipkg_path }}" \
+              sbom/*.cyclonedx.json sbom/*.spdx.json \
+              --clobber
           else
             gh release create "${{ matrix.tag }}" \
               "${{ steps.artifacts.outputs.nipkg_path }}" \
+              sbom/*.cyclonedx.json sbom/*.spdx.json \
               --title "${{ matrix.displayName }} v${{ matrix.version }}" \
               --notes "Release of ${{ matrix.displayName }} v${{ matrix.version }}" \
               --latest=false
@@ -205,6 +227,14 @@ jobs:
               exit 1
             fi
             ARTIFACT_NAME=$(jq -r '[.assets[] | select(.name | test("^[A-Za-z0-9][A-Za-z0-9._-]*[.]nipkg$")) | .name] | .[0]' <<<"$RELEASE_JSON")
+          fi
+
+          CYCLODEX_COUNT=$(jq '[.assets[] | select(.name | test("[.]cyclonedx[.]json$"))] | length' <<<"$RELEASE_JSON")
+          SPDX_COUNT=$(jq '[.assets[] | select(.name | test("[.]spdx[.]json$"))] | length' <<<"$RELEASE_JSON")
+          if [ "$CYCLODEX_COUNT" -ne 1 ] || [ "$SPDX_COUNT" -ne 1 ]; then
+            echo "Release $RELEASE_TAG must contain exactly one CycloneDX and one SPDX SBOM asset before submission." >&2
+            echo 'Build a new release with this workflow; SBOMs cannot be reconstructed safely from a .nipkg alone.' >&2
+            exit 1
           fi
 
           DOWNLOAD_DIR="$RUNNER_TEMP/plugin-manager-release"
