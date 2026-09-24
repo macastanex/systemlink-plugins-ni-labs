@@ -157,6 +157,7 @@ const searchFilter = document.getElementById('searchFilter');
 const detailDrawer = document.getElementById('detailDrawer');
 const drawerBackdrop = document.getElementById('drawerBackdrop');
 const drawerCloseBtn = document.getElementById('drawerCloseBtn');
+const drawerCancelBtn = document.getElementById('drawerCancelBtn');
 const drawerTitle = document.getElementById('drawerTitle');
 const drawerSubtitle = document.getElementById('drawerSubtitle');
 const drawerBody = document.getElementById('drawerBody');
@@ -340,7 +341,7 @@ function setupEventListeners() {
     searchFilter.addEventListener('input', debounce(renderBoard, 300));
     drawerBackdrop.addEventListener('click', closeDrawer);
     drawerCloseBtn.addEventListener('click', closeDrawer);
-    document.getElementById('drawerCancelBtn').addEventListener('click', closeDrawer);
+    drawerCancelBtn.addEventListener('click', () => closeDrawer());
     drawerSaveBtn.addEventListener('click', saveDrawerChanges);
 
     // Close drawer on Escape
@@ -1225,6 +1226,8 @@ function wirePropertyButtons() {
 }
 
 function closeDrawer() {
+    if (drawerSaveInProgress) return;
+
     drawerSessionId += 1;
     detailDrawer.hidden = true;
     document.body.style.overflow = '';
@@ -1232,6 +1235,8 @@ function closeDrawer() {
     drawerSaveInProgress = false;
     drawerOriginalUpdatedAt = null;
     drawerOriginalPropertiesSnapshot = null;
+    drawerCloseBtn.removeAttribute('disabled');
+    drawerCancelBtn.removeAttribute('disabled');
     drawerSaveBtn.removeAttribute('disabled');
     drawerSubtitle.textContent = '';
     drawerSubtitle.href = '#';
@@ -1356,6 +1361,8 @@ async function saveDrawerChanges() {
     }
 
     drawerSaveInProgress = true;
+    drawerCloseBtn.setAttribute('disabled', '');
+    drawerCancelBtn.setAttribute('disabled', '');
     drawerSaveBtn.setAttribute('disabled', '');
     const saveToken = Symbol(itemId);
     workItemSaveTokens.set(itemId, saveToken);
@@ -1381,6 +1388,7 @@ async function saveDrawerChanges() {
         populateAssigneeFilter();
         renderBoard();
         if (drawerSessionId === saveSessionId && currentDrawerItem?.id === itemId) {
+            drawerSaveInProgress = false;
             closeDrawer();
         }
     } catch (err) {
@@ -1392,6 +1400,8 @@ async function saveDrawerChanges() {
         }
         if (drawerSessionId === saveSessionId) {
             drawerSaveInProgress = false;
+            drawerCloseBtn.removeAttribute('disabled');
+            drawerCancelBtn.removeAttribute('disabled');
             drawerSaveBtn.removeAttribute('disabled');
         }
     }
