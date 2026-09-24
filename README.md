@@ -3,6 +3,7 @@
 This repository is a source repo for NI Labs plugins that are distributed through the Plugin Manager for SystemLink catalog.
 
 It is set up to:
+
 - build one or more plugin payloads from this repo
 - package each plugin as a `.nipkg` with embedded Plugin Manager metadata
 - publish the reviewed `.nipkg` as a GitHub release asset in this repo
@@ -14,12 +15,20 @@ It is set up to:
 .
 ├── .github/workflows/publish-to-plugin-manager.yml
 ├── plugins/
+│   ├── atml-file-manager/
+│   │   ├── nipkg.config.json
+│   │   ├── package.json
+│   │   └── webapp/
 │   ├── ni-labs-asset-calibration-alarms-notification/
 │   │   ├── notebook/
 │   │   ├── nipkg.config.json
 │   │   └── package.json
 │   ├── ni-labs-welcome/
 │   │   ├── app/
+│   │   ├── nipkg.config.json
+│   │   └── package.json
+│   ├── node-license-management/
+│   │   ├── src/
 │   │   ├── nipkg.config.json
 │   │   └── package.json
 │   └── work-item-kanban-board-webapp/
@@ -37,6 +46,7 @@ It is set up to:
 ## How publishing works
 
 Each plugin lives under `plugins/<plugin-name>/` and must provide:
+
 - a plugin payload directory such as `app/` for webapps or `notebook/` for notebooks
 - a `package.json` with at least a `build` script
 - a `nipkg.config.json` containing the package metadata that will be embedded into the `.nipkg`
@@ -44,10 +54,12 @@ Each plugin lives under `plugins/<plugin-name>/` and must provide:
 Each plugin package script should also verify the generated archive before publication so malformed `.nipkg` files are caught locally and in CI.
 
 The `xbPlugin` value in `nipkg.config.json` identifies the Plugin Manager resource type. For example:
+
 - `webapp` packages a browser application payload
 - `notebook` packages one or more `.ipynb` files and exposes them as installable notebook content
 
 The GitHub Actions workflow:
+
 1. discovers plugins from `plugins/*/nipkg.config.json`
 2. builds and packages the selected plugin(s)
 3. computes a thin submission manifest with `schemaVersion`, `nipkgFile`, `sha256`, `sourceRepo`, `releaseTag`, and `sourceCommit`
@@ -57,6 +69,7 @@ The GitHub Actions workflow:
 ## Required secret
 
 Create a classic PAT with `repo` scope and store it in this repository as:
+
 - `PLUGIN_MANAGER_DISPATCH_TOKEN`
 
 That token is used only to dispatch the submission event to the app-store repository.
@@ -96,6 +109,15 @@ npm run submission-manifest --workspace @ni-kismet/ni-labs-welcome
 5. Commit the change and either:
    - push a tag matching `<package>-v<version>` to publish a single plugin release, or
    - run the `Publish to Plugin Manager` workflow manually
+
+To submit an existing release without rebuilding a plugin in this repository, run the
+same workflow manually with `release_tag` set. The release must contain exactly one
+CycloneDX SBOM (`*.cyclonedx.json`) and one SPDX SBOM (`*.spdx.json`) in addition to
+the `.nipkg`. The workflow downloads the only `.nipkg` asset from that release,
+verifies its SHA256, and dispatches the submission PR. Releases with multiple `.nipkg`
+assets are rejected because a single SBOM pair cannot reliably identify which package
+it describes. You can also provide the 40-character build commit as `source_commit`
+for provenance.
 
 ## Tag convention
 

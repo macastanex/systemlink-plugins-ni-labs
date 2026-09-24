@@ -1,0 +1,18 @@
+{
+  "name": "atml-file-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Browse SystemLink files, render ATML (IEEE 1671/1636) test results in a readable summary and step tree, and import ATML files as native Test Monitor results.",
+  "license": "MIT",
+  "homepage": "https://github.com/ni-kismet/systemlink-plugins-ni-labs",
+  "scripts": {
+    "clean": "rm -rf dist submission-manifest.json",
+    "start": "node scripts/start.js",
+    "build": "node scripts/build.js",
+    "package": "npm run clean && npm run build && node ../../scripts/build-plugin-package.mjs . && node ../../scripts/verify-plugin-package.mjs .",
+    "submission-manifest": "npm run package && node ../../scripts/create-submission-manifest.mjs ."
+  },
+  "dependencies": {
+    "@ni/nimble-components": "35.13.1"
+  }
+}
