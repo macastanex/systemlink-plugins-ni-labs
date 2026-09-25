@@ -516,7 +516,10 @@ function getWorkspaceScopedItems() {
 function populateTypeFilter() {
     if (!msControls.type) return;
     const scopedItems = getWorkspaceScopedItems();
-    const availableTypes = new Set(scopedItems.map(w => w.type).filter(Boolean));
+    const availableTypes = new Set([
+        ...workItemTypes.map(workItemType => workItemType.type),
+        ...scopedItems.map(workItem => workItem.type),
+    ].filter(Boolean));
     const typeOptions = [...availableTypes]
         .map(type => ({ value: type, label: TYPE_LABELS[type] || type }))
         .sort((a, b) => a.label.localeCompare(b.label));

@@ -403,6 +403,7 @@ nimble-theme-provider[theme="color"] .trc-dialog,
       setPreset: (value) => applyPreset(value),
       setCustomRange: (start, end) => {
         if (!(start instanceof Date) || !(end instanceof Date)) return;
+        if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || end < start) return;
         state.mode = 'custom'; state.custom = { start, end }; updateButton(); emit();
       },
       open,
