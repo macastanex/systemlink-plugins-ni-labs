@@ -186,6 +186,7 @@ let drawerOriginalUpdatedAt = null;
 let drawerOriginalPropertiesSnapshot = null;
 const stateUpdateSequences = new Map();
 const stateUpdateChains = new Map();
+const confirmedWorkItemStates = new Map();
 const CARD_CLICK_DELAY = 250;
 
 // ─── Multi-select filter controls (MultiSelectControl instances) ─
@@ -599,7 +600,12 @@ async function loadWorkItems() {
             }
         } while (continuationToken);
 
-        allWorkItems = allItems;
+        allWorkItems = allItems.map(item => {
+            const pendingItem = stateUpdateChains.has(item.id)
+                ? allWorkItems.find(workItem => workItem.id === item.id)
+                : null;
+            return pendingItem ? { ...item, state: pendingItem.state } : item;
+        });
         populateTypeFilter();
         populateAssigneeFilter();
         renderBoard();
@@ -627,6 +633,7 @@ async function updateWorkItemState(workItemId, newState, updateSequence) {
             state: newState,
         }]);
 
+        confirmedWorkItemStates.set(workItemId, data?.updatedWorkItems?.[0]?.state || newState);
         if (!isLatestUpdate()) {
             return true;
         }
@@ -640,6 +647,7 @@ async function updateWorkItemState(workItemId, newState, updateSequence) {
             }
         }
 
+        renderBoard();
         showSuccess(`Moved to ${STATE_LABELS[newState] || newState}`);
         return true;
     } catch (err) {
@@ -719,7 +727,7 @@ async function loadAllUsers() {
 
         if (allWorkItems.length > 0) {
             populateAssigneeFilter();
-            renderBoard();
+            updateCardAssigneeLabels();
         }
     } catch (err) {
         console.warn('Failed to load users:', err);
@@ -729,6 +737,20 @@ async function loadAllUsers() {
 function getUserDisplayName(userId) {
     if (!userId) return 'Unassigned';
     return userDisplayNames[userId] || 'Unknown User';
+}
+
+function updateCardAssigneeLabels() {
+    for (const card of document.querySelectorAll('.kanban-card')) {
+        const item = allWorkItems.find(workItem => workItem.id === card.dataset.workItemId);
+        if (!item) continue;
+        const assignee = getUserDisplayName(item.assignedTo);
+        const label = card.querySelector('.card-assignee');
+        if (label) {
+            label.textContent = assignee;
+            label.title = assignee;
+        }
+        card.setAttribute('aria-label', `${item.name || 'Untitled'}, ${STATE_LABELS[item.state] || item.state}, assigned to ${assignee}`);
+    }
 }
 
 function populateAssigneeFilter() {
@@ -1105,6 +1127,9 @@ async function onDrop(e) {
 
     const oldState = draggedItem.state;
     const itemId = draggedItem.id;
+    if (!stateUpdateChains.has(itemId)) {
+        confirmedWorkItemStates.set(itemId, oldState);
+    }
     const updateSequence = (stateUpdateSequences.get(itemId) || 0) + 1;
     stateUpdateSequences.set(itemId, updateSequence);
 
@@ -1131,10 +1156,11 @@ async function onDrop(e) {
         // Rollback on failure
         const currentItem = allWorkItems.find(workItem => workItem.id === itemId);
         if (currentItem && currentItem.state === newState) {
-            currentItem.state = oldState;
+            currentItem.state = confirmedWorkItemStates.get(itemId);
         }
         renderBoard();
     }
+    confirmedWorkItemStates.delete(itemId);
 }
 
 // ─── Detail Drawer ──────────────────────────────────────────────
