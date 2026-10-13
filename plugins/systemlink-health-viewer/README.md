@@ -30,3 +30,6 @@ Nimble components.
 | `/niserviceregistry/v1/services` | Discover installed services and their live status |
 | `/niauth/v1/auth` | Resolve the session's edition entitlements to select applicable checks |
 | Configurable endpoints from `assets/test-mapping.json` | Probe each service's health (e.g. `/niauth/v1/policies`, `/nidataframe/v1/tables`, `/ninotebook/v1/notebook/query`, `/nitaghistorian/v2/tags/query-history`, `/nilocation/v1/locations`, and others) |
+
+Run `npm run test:i18n` to verify that an unavailable SystemLink translation harvest
+cannot overwrite the checked-in locale catalogs.

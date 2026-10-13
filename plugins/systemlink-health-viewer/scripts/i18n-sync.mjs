@@ -127,6 +127,15 @@ if (lookupIndex > 0) {
   process.exit(0);
 }
 
+for (const language of LANGUAGES) {
+  if (systemLink[language].size === 0) {
+    console.error(
+      `No SystemLink translations found for '${language}'; refusing to overwrite its locale file.`,
+    );
+    process.exit(1);
+  }
+}
+
 const source = readJson(path.join(localeDir, 'messages.json'), null);
 if (!source) {
   console.error(
