@@ -55,6 +55,22 @@ try {
   assert.equal(delays.length, 4);
   assert.ok(delays.every((ms) => ms >= 2000 && ms < 2250));
 
+  for (const payload of [{ data: [{ id: 'station-1' }] }, [{ data: { id: 'station-1' } }]]) {
+    const skips = [];
+    globalThis.fetch = async (request) => {
+      const body = await request.json();
+      skips.push(body.skip);
+      return Response.json(body.skip === 0 ? payload : { data: [] });
+    };
+    assert.deepEqual(await service.queryAllSystems('id != null', 'new(id)'), [{ id: 'station-1' }]);
+    assert.deepEqual(skips, [0, 1000]);
+  }
+
+  globalThis.fetch = async () => Response.json({}, { status: 400 });
+  assert.equal(await service.detectVirtualNodeSupport(), false);
+  await assert.rejects(service.queryAllSystems('id != null', 'new(id)'), /query-systems failed \(400\)/);
+  assert.equal((await service.queryTestResults({ take: 1 })).response.status, 400);
+
   for (const [status, expectedAttempts] of [[400, 1], [429, 7], [503, 7]]) {
     let attempts = 0;
     globalThis.fetch = async (request) => {
