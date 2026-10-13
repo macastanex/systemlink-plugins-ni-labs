@@ -69,3 +69,7 @@ PORT=4176 npm run start
 The repository root also forwards `npm run start` to this plugin. Hosted
 SystemLink deployments do not enable the mock unless the page is explicitly
 opened with `?demo=1`.
+
+Run `npm run check:locales --workspace atml-file-manager` to verify translation
+key and placeholder parity, the distinct created-result label, and language
+fallback precedence.

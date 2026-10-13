@@ -2209,7 +2209,7 @@ function addServiceFile(file, text) {
 }
 
 const UL_STATE_LABEL = {
-  ready: 'Ready', working: 'Working…', created: 'Created', replaced: 'Replaced',
+  ready: 'Ready', working: 'Working…', created: 'Result created', replaced: 'Replaced',
   skipped: 'Skipped', uploaded: 'Uploaded', error: 'Error',
 };
 

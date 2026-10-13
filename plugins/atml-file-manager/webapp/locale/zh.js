@@ -18,6 +18,7 @@ I18N.messages.zh = {
   'Name': '名称',
   'Extension': '扩展名',
   'Created': '创建时间',
+  'Result created': '结果已创建',
   'Updated': '更新时间',
   'Size': '大小',
   'Workspace': '工作区',

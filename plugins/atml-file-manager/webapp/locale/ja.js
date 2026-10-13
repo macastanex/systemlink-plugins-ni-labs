@@ -18,6 +18,7 @@ I18N.messages.ja = {
   'Name': '名前',
   'Extension': '拡張子',
   'Created': '作成日時',
+  'Result created': '結果作成済み',
   'Updated': '更新日時',
   'Size': 'サイズ',
   'Workspace': 'ワークスペース',

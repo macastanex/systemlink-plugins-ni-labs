@@ -13,7 +13,7 @@
 
   function normalize(value) {
     const lang = String(value || '').trim().toLowerCase().split(/[-_]/)[0];
-    return SUPPORTED.includes(lang) ? lang : 'en';
+    return SUPPORTED.includes(lang) ? lang : null;
   }
 
   function resolveLanguage() {
@@ -26,8 +26,7 @@
     if (navigator.languages && navigator.languages.length) candidates.push(navigator.languages[0]);
     candidates.push(navigator.language);
     try { candidates.push(Intl.DateTimeFormat().resolvedOptions().locale); } catch { /* ignore */ }
-    const first = candidates.find((c) => c && String(c).trim());
-    return normalize(first);
+    return candidates.map(normalize).find(Boolean) || 'en';
   }
 
   // SystemLink reloads the page on language change, so resolve once.

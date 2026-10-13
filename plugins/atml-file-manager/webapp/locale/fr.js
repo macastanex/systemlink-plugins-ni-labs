@@ -18,6 +18,7 @@ I18N.messages.fr = {
   'Name': 'Nom',
   'Extension': 'Extension',
   'Created': 'Créé',
+  'Result created': 'Résultat créé',
   'Updated': 'Mis à jour',
   'Size': 'Taille',
   'Workspace': 'Espace de travail',
