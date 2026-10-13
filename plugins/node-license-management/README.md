@@ -43,6 +43,12 @@ Manual translations, including the browser title, still need native-speaker revi
 
 Run `npm run test:i18n` for offline catalog/placeholder checks and regression
 checks covering preference precedence, runtime translations, and sync failures.
+`npm test` runs both the generated-client request/retry regression checks and
+these localization checks, including localized HTTP failures through the SDK.
+
+PR #17 includes the final PR #12 SDK fixes to preserve retries, request bodies,
+same-origin credentials, and network errors alongside localization.
+Merge PR #12 before PR #17 so the SDK migration is reviewed and recorded separately.
 
 ## SystemLink APIs Used
 
@@ -50,6 +56,14 @@ checks covering preference precedence, runtime translations, and sync failures.
 | --------------------------------- | ----------------------------------------------------------------------- |
 | `/nisysmgmt/v1/query-systems`     | Load managed and virtual systems and their grains                       |
 | `/nitestmonitor/v2/query-results` | Find host/`SYSTEM_ID` pairs per month and resolve latest result details |
+
+These requests use the generated SystemLink clients with same-origin credentials.
+HTTP 429/503 responses retry with backoff; each attempt sends a fresh clone of the
+request so POST bodies and JSON headers are preserved.
+Network failures propagate unchanged rather than becoming empty SDK responses.
+
+Run `npm test` from this directory to check the SDK endpoints, credentials,
+headers, POST-body replay, retry limits, and network-error propagation.
 
 ## Local Demo Mode
 
