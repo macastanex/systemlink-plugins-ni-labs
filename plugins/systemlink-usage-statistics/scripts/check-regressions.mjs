@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import ts from 'typescript';
 
 const pluginRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -334,5 +335,91 @@ test('locale catalogs cover all extracted messages and preserve interpolation pl
     for (const [id, message] of Object.entries(source)) {
       assert.deepEqual(placeholders(catalog.translations[id]), placeholders(message), `${locale} placeholders for ${id}`);
     }
+  }
+});
+
+test('saved regional and legacy language preferences resolve to supported language keys', () => {
+  const { getSystemLinkLanguage } = loadTypeScript('src/app/core/utils/language.utils.ts');
+  const originalStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  try {
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: { getItem: key => key === 'language' ? 'de-DE' : null },
+    });
+    assert.equal(getSystemLinkLanguage(), 'de');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      value: { getItem: key => key === 'skyline-api-languages' ? 'ja-JP,fr' : null },
+    });
+    assert.equal(getSystemLinkLanguage(), 'ja');
+  } finally {
+    if (originalStorage) {
+      Object.defineProperty(globalThis, 'localStorage', originalStorage);
+    } else {
+      delete globalThis.localStorage;
+    }
+  }
+});
+
+test('incomplete empty and partial locale harvests preserve every existing catalog', () => {
+  const fixtureRoot = path.join(pluginRoot, '.i18n-regression-fixture');
+  const source = path.join(pluginRoot, 'scripts/i18n-sync.mjs');
+  const preload = path.join(fixtureRoot, 'mock-fetch.mjs');
+  const fixtureLocales = path.join(fixtureRoot, 'src/locale');
+  const originalCatalogs = new Map();
+  fs.rmSync(fixtureRoot, { recursive: true, force: true });
+  fs.mkdirSync(path.join(fixtureLocales, 'manual'), { recursive: true });
+
+  try {
+    fs.writeFileSync(path.join(fixtureLocales, 'messages.json'), JSON.stringify({
+      translations: { '111': 'One', '222': 'Two' },
+    }));
+    for (const locale of ['de', 'fr', 'ja', 'zh']) {
+      const file = path.join(fixtureLocales, `messages.${locale}.json`);
+      const original = JSON.stringify({ locale, translations: { preserve: `existing-${locale}` } }, null, 2) + '\n';
+      fs.writeFileSync(file, original);
+      originalCatalogs.set(locale, original);
+      fs.writeFileSync(
+        path.join(fixtureLocales, 'manual', `${locale}.json`),
+        JSON.stringify({
+          One: `manual-${locale}`,
+          ...(locale === 'zh' ? {} : { Two: `manual-two-${locale}` }),
+        }),
+      );
+    }
+    fs.writeFileSync(preload, `
+const mode = process.env.RESPONSE_MODE;
+globalThis.fetch = async input => {
+  const url = String(input);
+  if (mode === 'empty') return new Response('<html></html>');
+  if (url.endsWith('/')) {
+    return new Response(url.includes('/webapps/') ? 'main-AAAA.js' : '<html></html>');
+  }
+  if (url.endsWith('/main-AAAA.js')) {
+    return new Response('getDe:()=>import("./chunk-DE.js"),getFr:()=>import("./chunk-FR.js"),getJa:()=>import("./chunk-JA.js"),getZh:()=>import("./chunk-ZH.js")');
+  }
+  if (/chunk-(DE|FR|JA|ZH)\\.js$/.test(url)) return new Response('"111":"system translation"');
+  return new Response('');
+};
+`);
+
+    for (const mode of ['empty', 'partial']) {
+      const result = spawnSync(process.execPath, [source], {
+        cwd: fixtureRoot,
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+          RESPONSE_MODE: mode,
+        },
+      });
+      assert.equal(result.status, 1, `${mode} harvest must fail closed: ${result.stderr}`);
+      assert.match(result.stderr, /Refusing to update locale catalogs/);
+      for (const [locale, original] of originalCatalogs) {
+        assert.equal(fs.readFileSync(path.join(fixtureLocales, `messages.${locale}.json`), 'utf8'), original);
+      }
+    }
+  } finally {
+    fs.rmSync(fixtureRoot, { recursive: true, force: true });
   }
 });

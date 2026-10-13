@@ -25,8 +25,9 @@ export function getSystemLinkLanguage(): string {
   const stored =
     readLocalStorage(SYSTEMLINK_LANGUAGE_STORAGE_KEY) ??
     readLocalStorage(SYSTEMLINK_LEGACY_LANGUAGE_STORAGE_KEY)?.split(',')[0];
-  if (stored && SYSTEMLINK_LANGUAGES.includes(stored)) {
-    return stored;
+  const storedLanguage = toLanguage(stored);
+  if (SYSTEMLINK_LANGUAGES.includes(storedLanguage)) {
+    return storedLanguage;
   }
 
   const browserCandidates = [

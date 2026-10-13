@@ -1,8 +1,8 @@
 // Syncs src/locale/messages.<lang>.json with the extracted source messages (src/locale/messages.json).
 // Each message uses SystemLink's own translation when SystemLink ships the same message (same
 // message ID), so wording matches the native UI; otherwise the reviewed translation from
-// src/locale/manual/<lang>.json (keyed by English source text) is used. Untranslated messages are
-// written to src/locale/missing.<lang>.json.
+// src/locale/manual/<lang>.json (keyed by English source text) is used. If any source message is
+// missing in any language, existing catalogs are preserved and the missing IDs are reported.
 // Usage:
 //   node scripts/i18n-sync.mjs [--server https://<systemlink-host>]
 //   node scripts/i18n-sync.mjs --lookup "English text" [...]   (prints SystemLink's wording)
@@ -135,6 +135,7 @@ if (!source) {
   process.exit(1);
 }
 
+const stagedCatalogs = [];
 for (const language of LANGUAGES) {
   const manual = readJson(path.join(localeDir, 'manual', `${language}.json`), {});
   const translations = {};
@@ -155,17 +156,44 @@ for (const language of LANGUAGES) {
     }
   }
 
-  fs.writeFileSync(
-    path.join(localeDir, `messages.${language}.json`),
-    `${JSON.stringify({ locale: language, translations }, null, 2)}\n`,
-  );
   const missingFile = path.join(localeDir, `missing.${language}.json`);
-  if (Object.keys(missing).length > 0) {
-    fs.writeFileSync(missingFile, `${JSON.stringify(missing, null, 2)}\n`);
-  } else if (fs.existsSync(missingFile)) {
-    fs.rmSync(missingFile);
+  const requiredIds = Object.keys(source.translations);
+  const translatedIds = new Set(Object.keys(translations));
+  const missingIds = requiredIds.filter((id) => !translatedIds.has(id));
+  stagedCatalogs.push({
+    language,
+    translations,
+    missing,
+    missingFile,
+    fromSystemLink,
+    fromManual,
+    missingIds,
+  });
+}
+
+const incompleteCatalogs = stagedCatalogs.filter((catalog) => catalog.missingIds.length > 0);
+if (incompleteCatalogs.length > 0) {
+  console.error('Refusing to update locale catalogs because translations are missing required source messages:');
+  for (const catalog of incompleteCatalogs) {
+    console.error(
+      `${catalog.language}: ${catalog.missingIds.length} missing (${catalog.missingIds.join(', ')})`,
+    );
   }
-  console.log(
-    `${language}: ${fromSystemLink} from SystemLink, ${fromManual} manual, ${Object.keys(missing).length} missing`,
-  );
+  process.exitCode = 1;
+} else {
+  for (const catalog of stagedCatalogs) {
+    fs.writeFileSync(
+      path.join(localeDir, `messages.${catalog.language}.json`),
+      `${JSON.stringify({ locale: catalog.language, translations: catalog.translations }, null, 2)}\n`,
+    );
+    const { missingFile, missing, language, fromSystemLink, fromManual } = catalog;
+    if (Object.keys(missing).length > 0) {
+      fs.writeFileSync(missingFile, `${JSON.stringify(missing, null, 2)}\n`);
+    } else if (fs.existsSync(missingFile)) {
+      fs.rmSync(missingFile);
+    }
+    console.log(
+      `${language}: ${fromSystemLink} from SystemLink, ${fromManual} manual, ${Object.keys(missing).length} missing`,
+    );
+  }
 }

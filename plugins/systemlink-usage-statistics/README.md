@@ -64,3 +64,5 @@ and records administrator snapshots so growth over time can be reviewed.
 
 Run `npm test` from this directory for focused regression checks. Run
 `npm run package` to create and verify the production `.nipkg` package.
+Run `npm run i18n` to refresh translation catalogs; it refuses incomplete
+source-message coverage without modifying the existing catalogs.
