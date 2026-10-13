@@ -278,6 +278,8 @@ export class HomePageComponent implements OnInit {
   // Empty string is the "All" option.
   selectedWorkspaceId = '';
   private loadSeq = 0;
+  private historyRecordedSeq = 0;
+  private latestCompleteValue: UsageDashboardModel | null = null;
   selectedMetricNode: UsageTreeNode | null = null;
   statisticsLoading = false;
   statisticsHistory: readonly TagHistoryEntry[] = [];
@@ -313,10 +315,7 @@ export class HomePageComponent implements OnInit {
     void this.resolveHiddenMetrics().finally(() => void this.reload());
     void this.currentUserService.checkIsSuperUser().then(result => {
       this.isSuperUser = result;
-      if (this.showDailyRate && this.state.value) {
-        void this.writeAllTags(this.state.value);
-        this.queueRateLoad(this.state.value.metrics);
-      }
+      if (this.latestCompleteValue) this.recordHistoryOnce(this.latestCompleteValue, this.loadSeq);
     });
   }
 
@@ -339,7 +338,7 @@ export class HomePageComponent implements OnInit {
     ];
     const hidden = new Set<string>();
     for (const entry of optionalServiceMetrics) {
-      if (!(await this.context.isServiceAvailable(entry.service))) {
+      if (!(await this.context.isServiceInstalled(entry.service))) {
         entry.keys.forEach(key => hidden.add(key));
       }
     }
@@ -353,13 +352,13 @@ export class HomePageComponent implements OnInit {
     this.rateQueue = [];
     this.rateQueuedKeys = new Set();
     this.dailyRates = new Map();
+    this.latestCompleteValue = null;
     this.state = { ...this.state, isLoading: true, error: null };
 
     const handlePartial = (partial: readonly UsageMetric[]) => {
       if (seq !== this.loadSeq) return;
       this.allTreeNodes = this.buildTreeNodes(partial, true);
       this.applySearchFilter();
-      if (this.showDailyRate) this.queueRateLoad(partial);
       // Show the tree as soon as any results arrive
       if (this.state.isLoading) {
         this.isPartialLoad = true;
@@ -378,10 +377,8 @@ export class HomePageComponent implements OnInit {
       this.allTreeNodes = this.buildTreeNodes(value.metrics);
       this.applySearchFilter();
       this.state = { value, isLoading: false, error: null };
-      if (this.showDailyRate) {
-        void this.writeAllTags(value);
-        this.queueRateLoad(value.metrics);
-      }
+      this.latestCompleteValue = value;
+      this.recordHistoryOnce(value, seq);
     } catch (error: unknown) {
       if (seq !== this.loadSeq) return;
       this.isPartialLoad = false;
@@ -598,6 +595,13 @@ export class HomePageComponent implements OnInit {
       .filter((m): m is typeof m & { value: number } => m.value !== null)
       .map(m => ({ key: m.key, value: m.value }));
     await this.tagStatisticsService.writeAllMetrics(metrics, model.refreshedAt);
+  }
+
+  private recordHistoryOnce(model: UsageDashboardModel, seq: number): void {
+    if (!this.showDailyRate || seq !== this.loadSeq || this.historyRecordedSeq === seq) return;
+    this.historyRecordedSeq = seq;
+    void this.writeAllTags(model);
+    this.queueRateLoad(model.metrics);
   }
 
   private escapeCsvValue(value: string): string {

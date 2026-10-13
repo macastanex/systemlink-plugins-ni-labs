@@ -24,6 +24,7 @@ export class TagStatisticsService {
   // Creates/updates all tags then writes their current values in two bulk calls.
   async writeAllMetrics(metrics: Array<{ key: string; value: number }>, timestamp: string): Promise<void> {
     const workspaceId = await this.context.resolveWorkspaceId();
+    if (!workspaceId) return;
     const entries = metrics.map(m => ({ path: this.tagPath(m.key), value: m.value }));
     await this.bulkEnsureTags(entries.map(e => e.path), workspaceId);
     await this.bulkWriteValues(entries, timestamp, workspaceId);
@@ -37,6 +38,7 @@ export class TagStatisticsService {
   async readTagHistory(metricKey: string): Promise<TagHistoryEntry[]> {
     const path = this.tagPath(metricKey);
     const workspaceId = await this.context.resolveWorkspaceId();
+    if (!workspaceId) return [];
     // The Tag Historian API has no workspace URL segment; workspace goes in the body.
     const historyPath = '/nitaghistorian/v2/tags/query-history';
     const allEntries: TagHistoryEntry[] = [];

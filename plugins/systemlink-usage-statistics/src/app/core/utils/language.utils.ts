@@ -1,5 +1,5 @@
 /** Languages the SystemLink shell supports; mirrors its language-preference resolution. */
-const SYSTEMLINK_LANGUAGES = ['fr', 'de', 'ja', 'zh', 'en', 'ko'];
+const SYSTEMLINK_LANGUAGES = ['fr', 'de', 'ja', 'zh', 'en'];
 const SYSTEMLINK_LANGUAGE_STORAGE_KEY = 'language';
 const SYSTEMLINK_LEGACY_LANGUAGE_STORAGE_KEY = 'skyline-api-languages';
 

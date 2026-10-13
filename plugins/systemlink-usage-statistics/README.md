@@ -59,3 +59,8 @@ and records administrator snapshots so growth over time can be reviewed.
 | `/nifeed/v1/feeds`, `/nifeed/v1/feeds/{id}/packages` | Count feeds and packages |
 | `/ninotebook/v1/notebook/query` | Count published notebooks |
 | `/dashboardhost/api/search` | Count dashboards (per workspace via folder UID) |
+
+## Local Checks
+
+Run `npm test` from this directory for focused regression checks. Run
+`npm run package` to create and verify the production `.nipkg` package.

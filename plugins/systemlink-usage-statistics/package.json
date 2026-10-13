@@ -8,6 +8,7 @@
   "scripts": {
     "start": "ng serve --host 0.0.0.0",
     "build": "ng build",
+    "test": "node --test scripts/check-regressions.mjs",
     "i18n": "ng extract-i18n --format json --output-path src/locale && node scripts/i18n-sync.mjs",
     "clean": "rm -rf dist submission-manifest.json",
     "package": "npm run clean && npm run build && node ../../scripts/build-plugin-package.mjs . && node ../../scripts/verify-plugin-package.mjs .",

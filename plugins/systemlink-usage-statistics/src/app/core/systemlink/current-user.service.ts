@@ -45,7 +45,7 @@ export class CurrentUserService {
       return Array.isArray(statements) && statements.some(statement => {
         const s = statement as { actions?: unknown; resource?: unknown; workspace?: unknown } | null;
         return Array.isArray(s?.actions) && s.actions.includes('*')
-          && Array.isArray(s.resource) && s.resource.includes('*')
+          && (s.resource === undefined || (Array.isArray(s.resource) && s.resource.includes('*')))
           && (s.workspace === undefined || s.workspace === '*');
       });
     });

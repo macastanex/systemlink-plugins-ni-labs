@@ -14,7 +14,7 @@ export class SystemLinkContextService {
   readonly authMode: AuthMode = 'same-origin';
 
   private workspaceIdCache: Promise<string | null> | null = null;
-  private liveServicesCache: Promise<Set<string> | null> | null = null;
+  private installedServicesCache: Promise<Set<string> | null> | null = null;
 
   get workspaceName(): string {
     return this.extractWorkspaceName();
@@ -46,12 +46,16 @@ export class SystemLinkContextService {
 
   // Resolves the workspace ID matching the webapp's deployed workspace (from URL path).
   resolveWorkspaceId(): Promise<string | null> {
-    // Don't cache null — if lookup failed, retry on next call
     if (!this.workspaceIdCache) {
-      const p = this.fetchWorkspaceId();
-      p.then(id => { if (id) this.workspaceIdCache = p; });
+      const lookup = this.fetchWorkspaceId();
+      this.workspaceIdCache = lookup;
+      void lookup.then(id => {
+        if (id === null && this.workspaceIdCache === lookup) {
+          this.workspaceIdCache = null;
+        }
+      });
     }
-    return this.workspaceIdCache ?? this.fetchWorkspaceId();
+    return this.workspaceIdCache;
   }
 
   // Lists workspaces visible to the current user, sorted by name.
@@ -73,24 +77,24 @@ export class SystemLinkContextService {
     }
   }
 
-  // Returns the set of LIVE services from the Service Registry, or null when the registry is unreachable.
-  private getLiveServices(): Promise<Set<string> | null> {
-    if (!this.liveServicesCache) {
-      this.liveServicesCache = this.fetchLiveServices();
+  // Returns installed services, or null when the registry is unreachable.
+  private getInstalledServices(): Promise<Set<string> | null> {
+    if (!this.installedServicesCache) {
+      this.installedServicesCache = this.fetchInstalledServices();
     }
-    return this.liveServicesCache;
+    return this.installedServicesCache;
   }
 
-  // Checks the Service Registry for a LIVE service. Assumes available when the registry is unreachable.
-  async isServiceAvailable(serviceName: string): Promise<boolean> {
-    const services = await this.getLiveServices();
+  // A registered but stopped service is installed; let its API request report the failure.
+  async isServiceInstalled(serviceName: string): Promise<boolean> {
+    const services = await this.getInstalledServices();
     if (services === null) {
       return true;
     }
     return services.has(serviceName);
   }
 
-  private async fetchLiveServices(): Promise<Set<string> | null> {
+  private async fetchInstalledServices(): Promise<Set<string> | null> {
     try {
       const response = await fetch(
         this.buildApiUrl('/niserviceregistry/v1/services'),
@@ -104,19 +108,18 @@ export class SystemLinkContextService {
       if (!Array.isArray(services)) {
         return null;
       }
-      const live = new Set<string>();
+      const installed = new Set<string>();
       for (const service of services) {
         if (!service || typeof service !== 'object') {
           continue;
         }
         const record = service as Record<string, unknown>;
         const name = typeof record['name'] === 'string' ? record['name'] : null;
-        const status = typeof record['status'] === 'string' ? record['status'] : null;
-        if (name && (status === null || status.toUpperCase() === 'LIVE')) {
-          live.add(name);
+        if (name) {
+          installed.add(name);
         }
       }
-      return live;
+      return installed;
     } catch {
       return null;
     }
@@ -162,7 +165,7 @@ export class SystemLinkContextService {
           key => typeof w[key] === 'string' && (w[key] as string).toLowerCase() === lower,
         ),
       );
-      const id = match ? String(match['id']) : null;
+      const id = match && typeof match['id'] === 'string' ? match['id'] : null;
       console.debug('[SystemLinkContext] workspace ID resolved:', id, 'for name:', name);
       return id;
     } catch {

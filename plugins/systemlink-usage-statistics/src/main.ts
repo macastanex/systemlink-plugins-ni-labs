@@ -22,7 +22,6 @@ const localeDataLoaders: Record<string, () => Promise<{ default: unknown[] }>> =
   fr: () => import('@angular/common/locales/fr'),
   ja: () => import('@angular/common/locales/ja'),
   zh: () => import('@angular/common/locales/zh'),
-  ko: () => import('@angular/common/locales/ko'),
 };
 
 async function bootstrap(): Promise<void> {

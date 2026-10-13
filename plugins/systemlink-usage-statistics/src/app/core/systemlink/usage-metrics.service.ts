@@ -57,6 +57,7 @@ interface WorkItemTypeCountResult {
 }
 
 interface SystemsSummaryCounts {
+  total: number | null;
   connected: number | null;
   disconnected: number | null;
   virtual: number | null;
@@ -64,6 +65,11 @@ interface SystemsSummaryCounts {
 }
 
 interface FeedPackageCountResult {
+  total: number | null;
+  unauthorized: boolean;
+}
+
+interface PagedCollectionCountResult {
   total: number | null;
   unauthorized: boolean;
 }
@@ -608,7 +614,7 @@ export class UsageMetricsService {
     ];
     const hiddenKeys = new Set<string>();
     for (const entry of optionalServiceMetrics) {
-      if (!(await this.context.isServiceAvailable(entry.service))) {
+      if (!(await this.context.isServiceInstalled(entry.service))) {
         entry.keys.forEach(key => hiddenKeys.add(key));
       }
     }
@@ -699,7 +705,11 @@ export class UsageMetricsService {
       case 'assets':
         return scoped([{ method: 'POST', path: '/niapm/v1/query-assets', body: { filter, take: 1, returnCount: true } }]);
       case 'files':
-        return scoped([{ method: 'POST', path: '/nifile/v1/service-groups/Default/query-files', body: { take: 1, workspace: ws } }]);
+        return scoped([{
+          method: 'POST',
+          path: '/nifile/v1/service-groups/Default/query-files?workspace=' + wsParam,
+          body: { take: 1 },
+        }]);
       case 'data-spaces':
         return scoped([{
           method: 'POST',
@@ -860,78 +870,83 @@ export class UsageMetricsService {
     let total = 0;
     const counts = new Map<string, number>();
 
-    while (page < maxPages) {
-      const body: Record<string, unknown> = { take };
-      if (ws) {
-        body['filter'] = this.workspaceFilter(ws);
-      }
-      if (continuationToken) {
-        body['continuationToken'] = continuationToken;
-      }
-
-      const response = await fetch(
-        this.context.buildApiUrl('/niworkitem/v1/query-workitems'),
-        this.context.buildRequestInit({
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(body),
-        }),
-      );
-
-      if (!response.ok) {
-        return {
-          total: null,
-          counts: new Map<string, number>(),
-          unauthorized: response.status === 401 || response.status === 403,
-        };
-      }
-
-      const payload = (await response.json()) as unknown;
-      if (!payload || typeof payload !== 'object') {
-        return {
-          total: null,
-          counts: new Map<string, number>(),
-          unauthorized: false,
-        };
-      }
-
-      const record = payload as Record<string, unknown>;
-      const workItems = Array.isArray(record['workItems'])
-        ? (record['workItems'] as unknown[])
-        : Array.isArray(record['workitems'])
-          ? (record['workitems'] as unknown[])
-          : [];
-
-      total += workItems.length;
-      for (const item of workItems) {
-        const type = this.extractWorkItemTypeValue(item);
-        if (!type) {
-          continue;
+    try {
+      while (page < maxPages) {
+        const body: Record<string, unknown> = { take };
+        if (ws) {
+          body['filter'] = this.workspaceFilter(ws);
+        }
+        if (continuationToken) {
+          body['continuationToken'] = continuationToken;
         }
 
-        counts.set(type, (counts.get(type) ?? 0) + 1);
-      }
+        const response = await fetch(
+          this.context.buildApiUrl('/niworkitem/v1/query-workitems'),
+          this.context.buildRequestInit({
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+          }),
+        );
 
-      const tokenValue = record['continuationToken'];
-      continuationToken = typeof tokenValue === 'string' && tokenValue.length > 0 ? tokenValue : undefined;
-      page += 1;
+        if (!response.ok) {
+          return {
+            total: null,
+            counts: new Map<string, number>(),
+            unauthorized: response.status === 401 || response.status === 403,
+          };
+        }
 
-      if (!continuationToken) {
-        return {
-          total,
-          counts,
-          unauthorized: false,
-        };
+        const payload = (await response.json()) as unknown;
+        if (!payload || typeof payload !== 'object') {
+          return {
+            total: null,
+            counts: new Map<string, number>(),
+            unauthorized: false,
+          };
+        }
+
+        const record = payload as Record<string, unknown>;
+        const workItems = Array.isArray(record['workItems'])
+          ? record['workItems'] as unknown[]
+          : Array.isArray(record['workitems'])
+            ? record['workitems'] as unknown[]
+            : Array.isArray(payload)
+              ? payload
+              : null;
+        if (!workItems) {
+          return { total: null, counts: new Map<string, number>(), unauthorized: false };
+        }
+
+        total += workItems.length;
+        for (const item of workItems) {
+          const type = this.extractWorkItemTypeValue(item);
+          if (!type) {
+            continue;
+          }
+
+          counts.set(type, (counts.get(type) ?? 0) + 1);
+        }
+
+        const tokenValue = record['continuationToken'];
+        continuationToken = typeof tokenValue === 'string' && tokenValue.length > 0 ? tokenValue : undefined;
+        page += 1;
+
+        if (!continuationToken) {
+          return {
+            total,
+            counts,
+            unauthorized: false,
+          };
+        }
       }
+    } catch {
+      return { total: null, counts: new Map<string, number>(), unauthorized: false };
     }
 
-    return {
-      total,
-      counts,
-      unauthorized: false,
-    };
+    return { total: null, counts: new Map<string, number>(), unauthorized: false };
   }
 
   private extractWorkItemTypeValue(item: unknown): string | null {
@@ -1030,13 +1045,13 @@ export class UsageMetricsService {
     ) {
       const systemsSummary = await this.getSystemsSummaryCounts(ws);
       if (systemsSummary) {
-        const total =
-          (systemsSummary.connected ?? 0) +
-          (systemsSummary.disconnected ?? 0) +
-          (systemsSummary.virtual ?? 0);
-
+        const total = systemsSummary.connected !== null
+          && systemsSummary.disconnected !== null
+          && systemsSummary.virtual !== null
+          ? systemsSummary.connected + systemsSummary.disconnected + systemsSummary.virtual
+          : null;
         const valueByKey: Record<string, number | null> = {
-          'systems': total,
+          'systems': systemsSummary.total ?? total,
           'connected-systems': systemsSummary.connected,
           'disconnected-systems': systemsSummary.disconnected,
           'virtual-systems': systemsSummary.virtual,
@@ -1080,13 +1095,7 @@ export class UsageMetricsService {
     }
 
     if (probe.key === 'grafana-dashboards') {
-      const grafanaCount = await this.countGrafanaDashboardsStrict(ws);
-      if (grafanaCount) {
-        return {
-          attempt: grafanaCount,
-          unauthorized: false,
-        };
-      }
+      return this.countGrafanaDashboardsStrict(ws);
     }
 
     if (probe.key === 'locations' && ws) {
@@ -1122,20 +1131,20 @@ export class UsageMetricsService {
         filter: ws ? this.workspaceFilter(ws) : undefined,
         workspace: ws,
       });
-      if (notebookCount !== null) {
+      if (notebookCount.total !== null) {
         return {
           attempt: {
             request: {
               method: 'POST',
               path: '/ninotebook/v1/notebook/query (paged)',
             },
-            value: notebookCount,
+            value: notebookCount.total,
           },
           unauthorized: false,
         };
       }
 
-      return { attempt: null, unauthorized: false };
+      return { attempt: null, unauthorized: notebookCount.unauthorized };
     }
 
     if (probe.key === 'max-file-size') {
@@ -1183,33 +1192,33 @@ export class UsageMetricsService {
 
     if (probe.key === 'work-flows') {
       const workflowsCount = await this.countWorkflowsViaPagination(ws);
-      if (workflowsCount !== null) {
+      if (workflowsCount.total !== null) {
         return {
           attempt: {
             request: {
               method: 'POST',
               path: '/niworkitem|niworkorder/v1/query-workflows (paged)',
             },
-            value: workflowsCount,
+            value: workflowsCount.total,
           },
           unauthorized: false,
         };
       }
 
       // Avoid generic fallback for Workflows because nested metadata fields often include version=1.
-      return { attempt: null, unauthorized: false };
+      return { attempt: null, unauthorized: workflowsCount.unauthorized };
     }
 
     if (probe.key === 'work-item-templates') {
       const templatesCount = await this.countWorkItemTemplatesViaPagination(ws);
-      if (templatesCount !== null) {
+      if (templatesCount.total !== null) {
         return {
           attempt: {
             request: {
               method: 'POST',
               path: '/niworkitem/v1/query-workitem-templates (paged)',
             },
-            value: templatesCount,
+            value: templatesCount.total,
           },
           unauthorized: false,
         };
@@ -1276,7 +1285,7 @@ export class UsageMetricsService {
     let sawUnauthorized = false;
 
     for (const request of probe.requests) {
-      const result = await this.tryRequest(request, probe.parser ?? this.extractCount);
+      const result = await this.tryRequest(request, probe.parser ?? (payload => this.extractCount(payload)));
       sawUnauthorized = sawUnauthorized || result.unauthorized;
       if (result.value !== null) {
         return {
@@ -1303,9 +1312,11 @@ export class UsageMetricsService {
   private async fetchWorkspaceSystemsCounts(ws: string): Promise<SystemsSummaryCounts | null> {
     const take = 1000;
     let skip = 0;
+    let total = 0;
     let connected = 0;
     let disconnected = 0;
     let virtual = 0;
+    let complete = false;
 
     try {
       for (let page = 0; page < 500; page++) {
@@ -1325,6 +1336,7 @@ export class UsageMetricsService {
 
         if (!response.ok) {
           return {
+            total: null,
             connected: null,
             disconnected: null,
             virtual: null,
@@ -1336,11 +1348,16 @@ export class UsageMetricsService {
         if (!systems) {
           return null;
         }
+        total += systems.length;
 
         for (const system of systems) {
-          const state = system && typeof system === 'object'
-            ? String((system as Record<string, unknown>)['state'] ?? '').toUpperCase()
-            : '';
+          const record = system && typeof system === 'object'
+            ? system as Record<string, unknown>
+            : null;
+          const data = record?.['data'];
+          const stateValue = record?.['state']
+            ?? (data && typeof data === 'object' ? (data as Record<string, unknown>)['state'] : null);
+          const state = typeof stateValue === 'string' ? stateValue.toUpperCase() : '';
           // Matches the summary endpoint, which counts CONNECTED_REFRESH_* states as connected.
           if (state.startsWith('CONNECTED')) {
             connected += 1;
@@ -1352,6 +1369,7 @@ export class UsageMetricsService {
         }
 
         if (systems.length < take) {
+          complete = true;
           break;
         }
         skip += take;
@@ -1360,7 +1378,9 @@ export class UsageMetricsService {
       return null;
     }
 
-    return { connected, disconnected, virtual, unauthorized: false };
+    return complete
+      ? { total, connected, disconnected, virtual, unauthorized: false }
+      : { total: null, connected: null, disconnected: null, virtual: null, unauthorized: false };
   }
 
   private async countLocationsInWorkspace(ws: string): Promise<{ value: number | null; unauthorized: boolean }> {
@@ -1391,6 +1411,7 @@ export class UsageMetricsService {
 
       if (!response.ok) {
         return {
+          total: null,
           connected: null,
           disconnected: null,
           virtual: null,
@@ -1408,8 +1429,14 @@ export class UsageMetricsService {
       const disconnected =
         this.toNumber(record['disconnectedCount']) ?? this.toNumber(record['DisconnectedCount']);
       const virtual = this.toNumber(record['virtualCount']) ?? this.toNumber(record['VirtualCount']);
+      const total = this.toNumber(record['totalCount'])
+        ?? this.toNumber(record['TotalCount'])
+        ?? (connected !== null && disconnected !== null && virtual !== null
+          ? connected + disconnected + virtual
+          : null);
 
       return {
+        total,
         connected,
         disconnected,
         virtual,
@@ -1792,7 +1819,7 @@ export class UsageMetricsService {
       }
     }
 
-    return total > 0 ? total : null;
+    return null;
   }
 
   private async countSystemsViaPagination(filter?: string): Promise<number | null> {
@@ -1844,7 +1871,7 @@ export class UsageMetricsService {
       skip += take;
     }
 
-    return total > 0 ? total : null;
+    return null;
   }
 
   private async countSystemsViaGetSystems(): Promise<number | null> {
@@ -1932,8 +1959,6 @@ export class UsageMetricsService {
     let count = 0;
     let maxRows: number | null = null;
     let maxColumns: number | null = null;
-    let sawTable = false;
-    let unauthorized = false;
 
     while (page < maxPages) {
       const body: Record<string, unknown> = {
@@ -1958,31 +1983,35 @@ export class UsageMetricsService {
           }),
         );
       } catch {
-        return sawTable ? { count, maxRows, maxColumns, unauthorized } : null;
+        return { count: null, maxRows: null, maxColumns: null, unauthorized: false };
       }
 
       if (!response.ok) {
-        if (response.status === 401 || response.status === 403) {
-          unauthorized = true;
-        }
-        return sawTable
-          ? { count, maxRows, maxColumns, unauthorized }
-          : { count: null, maxRows: null, maxColumns: null, unauthorized };
+        return {
+          count: null,
+          maxRows: null,
+          maxColumns: null,
+          unauthorized: response.status === 401 || response.status === 403,
+        };
       }
 
-      const payload = (await response.json()) as unknown;
-      if (!payload || typeof payload !== 'object') {
-        break;
+      let payload: unknown;
+      try {
+        payload = await response.json();
+      } catch {
+        return { count: null, maxRows: null, maxColumns: null, unauthorized: false };
+      }
+      if (!payload || typeof payload !== 'object' || !Array.isArray((payload as Record<string, unknown>)['tables'])) {
+        return { count: null, maxRows: null, maxColumns: null, unauthorized: false };
       }
 
       const record = payload as Record<string, unknown>;
-      const tables = Array.isArray(record['tables']) ? record['tables'] : [];
+      const tables = record['tables'] as unknown[];
       count += tables.length;
       for (const table of tables) {
         if (!table || typeof table !== 'object') {
-          continue;
+          return { count: null, maxRows: null, maxColumns: null, unauthorized: false };
         }
-        sawTable = true;
         const tableRecord = table as Record<string, unknown>;
         const rows = this.toNumber(tableRecord['rowCount']);
         if (rows !== null) {
@@ -2004,29 +2033,36 @@ export class UsageMetricsService {
       }
     }
 
-    // No tables at all means the count and each maximum are zero.
-    if (!sawTable) {
-      return { count: 0, maxRows: 0, maxColumns: 0, unauthorized };
+    if (continuationToken) {
+      return { count: null, maxRows: null, maxColumns: null, unauthorized: false };
     }
 
-    return { count, maxRows, maxColumns, unauthorized };
+    // No tables at all means the count and each maximum are zero.
+    if (count === 0) {
+      return { count: 0, maxRows: 0, maxColumns: 0, unauthorized: false };
+    }
+
+    return { count, maxRows, maxColumns, unauthorized: false };
   }
 
   // Both services can return the same workflows, so count unique IDs across them.
-  private async countWorkflowsViaPagination(ws: string | null): Promise<number | null> {
+  private async countWorkflowsViaPagination(ws: string | null): Promise<PagedCollectionCountResult> {
     const seenIds = new Set<string>();
     const workItemTotal = await this.countWorkItemWorkflowsViaPagination(ws, seenIds);
     const workOrderTotal = await this.countWorkOrderWorkflowsViaPagination(ws, seenIds);
 
-    if (workItemTotal === null && workOrderTotal === null) {
-      return null;
+    if (workItemTotal.total === null && workOrderTotal.total === null) {
+      return { total: null, unauthorized: workItemTotal.unauthorized || workOrderTotal.unauthorized };
     }
 
-    return (workItemTotal ?? 0) + (workOrderTotal ?? 0);
+    return {
+      total: (workItemTotal.total ?? 0) + (workOrderTotal.total ?? 0),
+      unauthorized: false,
+    };
   }
 
   // query-workflows ignores filters, so workspace is applied client-side.
-  private async countWorkItemWorkflowsViaPagination(ws: string | null, seenIds: Set<string>): Promise<number | null> {
+  private async countWorkItemWorkflowsViaPagination(ws: string | null, seenIds: Set<string>): Promise<PagedCollectionCountResult> {
     return this.countPagedCollectionByContinuationToken({
       path: '/niworkitem/v1/query-workflows',
       collectionKey: 'workflows',
@@ -2035,7 +2071,7 @@ export class UsageMetricsService {
     });
   }
 
-  private async countWorkOrderWorkflowsViaPagination(ws: string | null, seenIds: Set<string>): Promise<number | null> {
+  private async countWorkOrderWorkflowsViaPagination(ws: string | null, seenIds: Set<string>): Promise<PagedCollectionCountResult> {
     return this.countPagedCollectionByContinuationToken({
       path: '/niworkorder/v1/query-workflows',
       collectionKey: 'workflows',
@@ -2044,7 +2080,7 @@ export class UsageMetricsService {
     });
   }
 
-  private async countWorkItemTemplatesViaPagination(ws: string | null): Promise<number | null> {
+  private async countWorkItemTemplatesViaPagination(ws: string | null): Promise<PagedCollectionCountResult> {
     return this.countPagedCollectionByContinuationToken({
       path: '/niworkitem/v1/query-workitem-templates',
       collectionKey: 'workItemTemplates',
@@ -2054,10 +2090,15 @@ export class UsageMetricsService {
   }
 
   private async countPackagesAcrossFeeds(ws: string | null): Promise<FeedPackageCountResult> {
-    const feedsResponse = await fetch(
-      this.context.buildApiUrl('/nifeed/v1/feeds' + (ws ? '?workspace=' + encodeURIComponent(ws) : '')),
-      this.context.buildRequestInit({ method: 'GET' }),
-    );
+    let feedsResponse: Response;
+    try {
+      feedsResponse = await fetch(
+        this.context.buildApiUrl('/nifeed/v1/feeds' + (ws ? '?workspace=' + encodeURIComponent(ws) : '')),
+        this.context.buildRequestInit({ method: 'GET' }),
+      );
+    } catch {
+      return { total: null, unauthorized: false };
+    }
 
     if (!feedsResponse.ok) {
       return {
@@ -2066,7 +2107,15 @@ export class UsageMetricsService {
       };
     }
 
-    const feedsPayload = (await feedsResponse.json()) as unknown;
+    let feedsPayload: unknown;
+    try {
+      feedsPayload = await feedsResponse.json();
+    } catch {
+      return { total: null, unauthorized: false };
+    }
+    if (!this.extractArrayCandidate(feedsPayload, ['feeds', 'value', 'items'])) {
+      return { total: null, unauthorized: false };
+    }
     const feedIds = this.extractFeedIds(feedsPayload);
     if (feedIds.length === 0) {
       return {
@@ -2078,6 +2127,8 @@ export class UsageMetricsService {
     // Smaller batch size + inter-batch delay to stay under the 429 rate limit
     const BATCH_SIZE = 5;
     let total = 0;
+    let failed = false;
+    let unauthorized = false;
 
     for (let i = 0; i < feedIds.length; i += BATCH_SIZE) {
       if (i > 0) {
@@ -2085,18 +2136,20 @@ export class UsageMetricsService {
       }
       const batch = feedIds.slice(i, i + BATCH_SIZE);
       const batchResults = await Promise.all(batch.map(feedId => this.fetchPackageCountForFeed(feedId)));
-      for (const count of batchResults) {
-        if (count === null) {
-          continue;
+      for (const result of batchResults) {
+        if (result.total === null) {
+          failed = true;
+          unauthorized ||= result.unauthorized;
+        } else {
+          total += result.total;
         }
-        total += count;
       }
     }
 
-    return { total, unauthorized: false };
+    return { total: failed ? null : total, unauthorized };
   }
 
-  private async fetchPackageCountForFeed(feedId: string): Promise<number | null> {
+  private async fetchPackageCountForFeed(feedId: string): Promise<FeedPackageCountResult> {
     const url = this.context.buildApiUrl('/nifeed/v1/feeds/' + encodeURIComponent(feedId) + '/packages');
     const init = this.context.buildRequestInit({ method: 'GET' });
 
@@ -2110,19 +2163,23 @@ export class UsageMetricsService {
         }
 
         if (!response.ok) {
-          return null;
+          return {
+            total: null,
+            unauthorized: response.status === 401 || response.status === 403,
+          };
         }
 
         const payload = (await response.json()) as unknown;
         const arr = this.extractArrayCandidate(payload, ['packages', 'value', 'items']);
-        if (arr) return arr.length;
-        return this.extractCollectionCount(payload, ['packages', 'value', 'items']) ?? 0;
+        if (arr) return { total: arr.length, unauthorized: false };
+        const total = this.extractCollectionCount(payload, ['packages', 'value', 'items']);
+        return { total, unauthorized: false };
       } catch {
-        return null;
+        return { total: null, unauthorized: false };
       }
     }
 
-    return null;
+    return { total: null, unauthorized: false };
   }
 
   private async getRoutineStatusCounts(ws: string | null): Promise<RoutineStatusCounts | null> {
@@ -2130,20 +2187,10 @@ export class UsageMetricsService {
   }
 
   private async countRoutineStatusesStrict(ws: string | null): Promise<RoutineStatusCounts | null> {
-    const fromV1 = await this.countRoutineStatusesByScanningRoutines('/niroutine/v1/routines', ws);
     const fromV2 = await this.countRoutineStatusesByScanningRoutines('/niroutine/v2/routines', ws);
-
-    const enabled =
-      fromV1?.enabled !== null && fromV1?.enabled !== undefined &&
-      fromV2?.enabled !== null && fromV2?.enabled !== undefined
-        ? fromV1.enabled + fromV2.enabled
-        : fromV1?.enabled ?? fromV2?.enabled ?? null;
-
-    const disabled =
-      fromV1?.disabled !== null && fromV1?.disabled !== undefined &&
-      fromV2?.disabled !== null && fromV2?.disabled !== undefined
-        ? fromV1.disabled + fromV2.disabled
-        : fromV1?.disabled ?? fromV2?.disabled ?? null;
+    const fromV1 = await this.countRoutineStatusesByScanningRoutines('/niroutine/v1/routines', ws);
+    const enabled = fromV2?.enabled ?? fromV1?.enabled ?? null;
+    const disabled = fromV2?.disabled ?? fromV1?.disabled ?? null;
 
     const alarms =
       fromV2?.alarms !== null && fromV2?.alarms !== undefined
@@ -2190,6 +2237,7 @@ export class UsageMetricsService {
     let sawAlarmSignal = false;
     const seenRoutineKeys = new Set<string>();
 
+    let complete = false;
     while (page < maxPages) {
       const params = new URLSearchParams();
       params.set('take', String(take));
@@ -2267,6 +2315,7 @@ export class UsageMetricsService {
       }
 
       if (newItemsOnPage === 0) {
+        complete = true;
         break;
       }
 
@@ -2278,6 +2327,10 @@ export class UsageMetricsService {
         // Continue until no new routines are discovered.
         continue;
       }
+    }
+
+    if (!complete) {
+      return null;
     }
 
     // The strict query fallbacks can't be workspace-scoped; only use them for All.
@@ -2520,7 +2573,7 @@ export class UsageMetricsService {
       skip += Math.max(routines.length, 1);
     }
 
-    return total;
+    return null;
   }
 
   private extractFeedIds(payload: unknown): string[] {
@@ -2564,14 +2617,15 @@ export class UsageMetricsService {
     workspace?: string | null;
     // Shared across calls to skip items already counted from another endpoint.
     seenIds?: Set<string>;
-  }): Promise<number | null> {
+  }): Promise<PagedCollectionCountResult> {
     const take = 1000;
     let continuationToken: string | undefined;
     let total = 0;
     let page = 0;
     const maxPages = 500;
 
-    while (page < maxPages) {
+    try {
+      while (page < maxPages) {
       const body: Record<string, unknown> = {
         take,
       };
@@ -2594,18 +2648,21 @@ export class UsageMetricsService {
       );
 
       if (!response.ok) {
-        return null;
+        return { total: null, unauthorized: response.status === 401 || response.status === 403 };
       }
 
       const payload = (await response.json()) as unknown;
       if (!payload || typeof payload !== 'object') {
-        return null;
+        return { total: null, unauthorized: false };
       }
 
       const record = payload as Record<string, unknown>;
       const items = Array.isArray(record[options.collectionKey])
-        ? (record[options.collectionKey] as unknown[])
-        : [];
+        ? record[options.collectionKey] as unknown[]
+        : Array.isArray(payload)
+          ? payload
+          : null;
+      if (!items) return { total: null, unauthorized: false };
       const workspace = options.workspace;
       const seenIds = options.seenIds;
       for (const item of items) {
@@ -2631,15 +2688,18 @@ export class UsageMetricsService {
       page += 1;
 
       if (!continuationToken) {
-        return total;
+        return { total, unauthorized: false };
       }
     }
+    } catch {
+      return { total: null, unauthorized: false };
+    }
 
-    return total > 0 ? total : null;
+    return { total: null, unauthorized: false };
   }
 
   // SystemLink stores each workspace's dashboards in a Grafana folder whose UID is the workspace ID.
-  private async countGrafanaDashboardsStrict(ws: string | null): Promise<CountAttempt | null> {
+  private async countGrafanaDashboardsStrict(ws: string | null): Promise<ProbeOutcome> {
     const bootstrapPaths = [
       '/dashboardhost/login',
     ];
@@ -2668,6 +2728,7 @@ export class UsageMetricsService {
       ? items.filter(item => item && typeof item === 'object'
         && (item as Record<string, unknown>)['folderUid'] === ws).length
       : items.length;
+    let unauthorized = false;
 
     for (const path of queryPaths) {
       try {
@@ -2677,6 +2738,7 @@ export class UsageMetricsService {
         );
 
         if (!response.ok) {
+          unauthorized ||= response.status === 401 || response.status === 403;
           continue;
         }
 
@@ -2692,45 +2754,35 @@ export class UsageMetricsService {
           continue;
         }
 
-        if (Array.isArray(payload)) {
+        let items: unknown[] | null = Array.isArray(payload) ? payload : null;
+        let totalCount: number | null = null;
+        if (!Array.isArray(payload) && payload && typeof payload === 'object') {
+          const record = payload as Record<string, unknown>;
+          totalCount = this.toNumber(record['totalCount']) ?? this.toNumber(record['TotalCount']);
+          const dashboards = record['dashboards'];
+          const results = record['results'];
+          items = Array.isArray(dashboards) ? dashboards : Array.isArray(results) ? results : null;
+        }
+        if (totalCount !== null && !ws) {
           return {
-            request: { method: 'GET', path },
-            value: countDashboards(payload),
+            attempt: { request: { method: 'GET', path }, value: totalCount },
+            unauthorized: false,
           };
         }
-
-        if (payload && typeof payload === 'object') {
-          const record = payload as Record<string, unknown>;
-          const dashboards = record['dashboards'];
-          if (Array.isArray(dashboards)) {
-            return {
-              request: { method: 'GET', path },
-              value: countDashboards(dashboards),
-            };
-          }
-
-          const results = record['results'];
-          if (Array.isArray(results)) {
-            return {
-              request: { method: 'GET', path },
-              value: countDashboards(results),
-            };
-          }
-
-          const totalCount = this.toNumber(record['totalCount']) ?? this.toNumber(record['TotalCount']);
-          if (totalCount !== null && !ws) {
-            return {
-              request: { method: 'GET', path },
-              value: totalCount,
-            };
-          }
+        if (items) {
+          const limit = Number(/[?&]limit=(\d+)/.exec(path)?.[1]) || 1000;
+          if (items.length >= limit) return { attempt: null, unauthorized: false };
+          return {
+            attempt: { request: { method: 'GET', path }, value: countDashboards(items) },
+            unauthorized: false,
+          };
         }
       } catch {
         continue;
       }
     }
 
-    return null;
+    return { attempt: null, unauthorized };
   }
 
   private extractCountFromRawText(raw: string): number | null {
