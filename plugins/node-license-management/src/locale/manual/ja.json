@@ -1,4 +1,5 @@
 {
+  "Node License Dashboard": "ノードライセンスダッシュボード",
   "(no host name)": "(ホスト名なし)",
   "View Result": "結果を表示",
   "query-systems failed ({$status})": "query-systems が失敗しました ({$status})",

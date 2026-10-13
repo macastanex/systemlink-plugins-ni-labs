@@ -24,6 +24,26 @@ per-node detail with links back to the source system and its latest test result.
   Japanese, Chinese), reusing SystemLink's own translations where available.
 - **Theme sync** — automatically follows the SystemLink light/dark theme.
 
+## Localization
+
+The saved `language` preference takes precedence over legacy `skyline-api-languages`,
+then the browser language, then English. Preferences are normalized (for example,
+`de-DE` becomes `de`); unsupported values fall through to the next candidate.
+Korean uses English application text with Korean date/number formatting.
+Reload the plugin after changing the SystemLink language.
+
+Run `npm run i18n` to extract messages and synchronize German, French, Japanese,
+and Chinese catalogs against SystemLink and `src/locale/manual/<lang>.json`.
+For another server, extract first, then run
+`node scripts/i18n-sync.mjs --server https://<systemlink-host>`.
+If translations are missing (including during a server outage), synchronization
+exits nonzero and preserves every existing localized catalog. The error count and
+`src/locale/missing.<lang>.json` reports identify the entries to supply.
+Manual translations, including the browser title, still need native-speaker review.
+
+Run `npm run test:i18n` for offline catalog/placeholder checks and regression
+checks covering preference precedence, runtime translations, and sync failures.
+
 ## SystemLink APIs Used
 
 | API / SDK call                    | Purpose                                                                 |

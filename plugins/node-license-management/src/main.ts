@@ -40,6 +40,7 @@ async function bootstrap(): Promise<void> {
     console.error(`Localization for '${language}' could not be loaded.`, error);
   }
   document.documentElement.lang = language;
+  document.title = $localize`Node License Dashboard`;
 
   // Imported after translations load so module-level $localize strings are translated.
   const [{ AppComponent }, { AppModule }] = await Promise.all([

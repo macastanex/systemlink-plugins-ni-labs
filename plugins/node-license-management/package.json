@@ -8,6 +8,7 @@
     "start": "ng serve --host 0.0.0.0",
     "build": "ng build",
     "i18n": "ng extract-i18n --format json --output-path src/locale && node scripts/i18n-sync.mjs",
+    "test:i18n": "node scripts/i18n-check.mjs",
     "clean": "rm -rf dist submission-manifest.json",
     "package": "npm run clean && npm run build && node ../../scripts/build-plugin-package.mjs . && node ../../scripts/verify-plugin-package.mjs .",
     "submission-manifest": "npm run package && node ../../scripts/create-submission-manifest.mjs ."

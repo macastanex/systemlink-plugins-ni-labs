@@ -1,4 +1,5 @@
 {
+  "Node License Dashboard": "Tableau de bord des licences de nœuds",
   "(no host name)": "(aucun nom d'hôte)",
   "View Result": "Afficher le résultat",
   "query-systems failed ({$status})": "Échec de query-systems ({$status})",

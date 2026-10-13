@@ -2,7 +2,7 @@
 // Each message uses SystemLink's own translation when SystemLink ships the same message (same
 // message ID), so wording matches the native UI; otherwise the reviewed translation from
 // src/locale/manual/<lang>.json (keyed by English source text) is used. Untranslated messages are
-// written to src/locale/missing.<lang>.json.
+// written to src/locale/missing.<lang>.json; incomplete syncs fail without changing any catalog.
 // Usage:
 //   node scripts/i18n-sync.mjs [--server https://<systemlink-host>]
 //   node scripts/i18n-sync.mjs --lookup "English text" [...]   (prints SystemLink's wording)
@@ -135,6 +135,8 @@ if (!source) {
   process.exit(1);
 }
 
+const catalogs = new Map();
+let missingCount = 0;
 for (const language of LANGUAGES) {
   const manual = readJson(path.join(localeDir, 'manual', `${language}.json`), {});
   const translations = {};
@@ -155,12 +157,10 @@ for (const language of LANGUAGES) {
     }
   }
 
-  fs.writeFileSync(
-    path.join(localeDir, `messages.${language}.json`),
-    `${JSON.stringify({ locale: language, translations }, null, 2)}\n`,
-  );
+  catalogs.set(language, { locale: language, translations });
   const missingFile = path.join(localeDir, `missing.${language}.json`);
   if (Object.keys(missing).length > 0) {
+    missingCount += Object.keys(missing).length;
     fs.writeFileSync(missingFile, `${JSON.stringify(missing, null, 2)}\n`);
   } else if (fs.existsSync(missingFile)) {
     fs.rmSync(missingFile);
@@ -168,4 +168,16 @@ for (const language of LANGUAGES) {
   console.log(
     `${language}: ${fromSystemLink} from SystemLink, ${fromManual} manual, ${Object.keys(missing).length} missing`,
   );
+}
+
+if (missingCount > 0) {
+  console.error(`Localization sync failed: ${missingCount} missing translations. Existing catalogs were not changed.`);
+  process.exitCode = 1;
+} else {
+  for (const [language, catalog] of catalogs) {
+    fs.writeFileSync(
+      path.join(localeDir, `messages.${language}.json`),
+      `${JSON.stringify(catalog, null, 2)}\n`,
+    );
+  }
 }

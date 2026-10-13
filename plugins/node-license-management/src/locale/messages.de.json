@@ -77,6 +77,7 @@
     "1126929185085648518": "{$month} · Verwaltet: {$count}",
     "8009154672660793469": "{$month} · Nicht verwaltet: {$count}",
     "4517730664301491853": "Noch keine Daten",
-    "6272168397724785474": "Knotennutzung wird geladen..."
+    "6272168397724785474": "Knotennutzung wird geladen...",
+    "3148937239438926377": "Dashboard für Knotenlizenzen"
   }
 }

@@ -1,4 +1,5 @@
 {
+  "Node License Dashboard": "Dashboard für Knotenlizenzen",
   "(no host name)": "(kein Host-Name)",
   "View Result": "Ergebnis anzeigen",
   "query-systems failed ({$status})": "query-systems fehlgeschlagen ({$status})",

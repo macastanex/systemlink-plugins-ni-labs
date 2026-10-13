@@ -1,4 +1,5 @@
 {
+  "Node License Dashboard": "节点许可证仪表板",
   "(no host name)": "(无主机名称)",
   "View Result": "查看结果",
   "query-systems failed ({$status})": "query-systems 失败 ({$status})",
