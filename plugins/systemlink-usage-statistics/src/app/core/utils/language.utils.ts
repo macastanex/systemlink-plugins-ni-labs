@@ -22,12 +22,15 @@ function readLocalStorage(key: string): string | null {
  * language preference first, then the browser language, then English.
  */
 export function getSystemLinkLanguage(): string {
-  const stored =
-    readLocalStorage(SYSTEMLINK_LANGUAGE_STORAGE_KEY) ??
-    readLocalStorage(SYSTEMLINK_LEGACY_LANGUAGE_STORAGE_KEY)?.split(',')[0];
-  const storedLanguage = toLanguage(stored);
+  const storedLanguage = toLanguage(readLocalStorage(SYSTEMLINK_LANGUAGE_STORAGE_KEY));
   if (SYSTEMLINK_LANGUAGES.includes(storedLanguage)) {
     return storedLanguage;
+  }
+  const legacyLanguage = toLanguage(
+    readLocalStorage(SYSTEMLINK_LEGACY_LANGUAGE_STORAGE_KEY)?.split(',')[0],
+  );
+  if (SYSTEMLINK_LANGUAGES.includes(legacyLanguage)) {
+    return legacyLanguage;
   }
 
   const browserCandidates = [

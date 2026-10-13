@@ -624,7 +624,14 @@ export class UsageMetricsService {
       .map((probe: CountProbe) => (ws ? this.scopeProbeToWorkspace(probe, ws) : probe));
 
     const runProbe = async (probe: CountProbe): Promise<UsageMetric> => {
-      const outcome = await this.probeCount(probe, ws);
+      let outcome: ProbeOutcome;
+      let requestFailed = false;
+      try {
+        outcome = await this.probeCount(probe, ws);
+      } catch {
+        outcome = { attempt: null, unauthorized: false };
+        requestFailed = true;
+      }
       const attempt = outcome.attempt;
       const status: UsageMetric['status'] = attempt
         ? 'ok'
@@ -636,7 +643,9 @@ export class UsageMetricsService {
         label: probe.label,
         detail: probe.detail,
         value: attempt ? attempt.value : null,
-        source: attempt?.request.path ?? (outcome.unauthorized ? 'Unauthorized (401/403)' : 'No count field returned'),
+        source: attempt?.request.path ?? (outcome.unauthorized
+          ? 'Unauthorized (401/403)'
+          : requestFailed ? 'Request failed' : 'No count field returned'),
         status,
       };
       accumulated.push(metric);
@@ -648,11 +657,20 @@ export class UsageMetricsService {
     const baseMetricsPromise = this.mapWithConcurrency(activeProbes, 6, runProbe);
 
     // Run work-item-type metrics concurrently with the base probes
-    const workItemTypePromise = this.loadWorkItemTypeMetrics(ws).then(witmMetrics => {
-      accumulated.push(...witmMetrics);
-      onPartialUpdate?.([...accumulated]);
-      return witmMetrics;
-    });
+    const workItemTypePromise = this.loadWorkItemTypeMetrics(ws)
+      .catch((): UsageMetric[] => [{
+        key: 'work-items-total',
+        label: 'Total Work Items',
+        detail: $localize`Total work items in Test Plans.`,
+        value: null,
+        source: 'Request failed',
+        status: 'unavailable',
+      }])
+      .then(witmMetrics => {
+        accumulated.push(...witmMetrics);
+        onPartialUpdate?.([...accumulated]);
+        return witmMetrics;
+      });
 
     const [baseMetrics, workItemTypeMetrics] = await Promise.all([
       baseMetricsPromise,
@@ -1225,7 +1243,7 @@ export class UsageMetricsService {
       }
 
       // Avoid generic fallback for templates because responses contain many scalar fields unrelated to totals.
-      return { attempt: null, unauthorized: false };
+      return { attempt: null, unauthorized: templatesCount.unauthorized };
     }
 
     if (probe.key === 'package-counts') {
@@ -2051,7 +2069,7 @@ export class UsageMetricsService {
     const workItemTotal = await this.countWorkItemWorkflowsViaPagination(ws, seenIds);
     const workOrderTotal = await this.countWorkOrderWorkflowsViaPagination(ws, seenIds);
 
-    if (workItemTotal.total === null && workOrderTotal.total === null) {
+    if (workItemTotal.total === null || workOrderTotal.total === null) {
       return { total: null, unauthorized: workItemTotal.unauthorized || workOrderTotal.unauthorized };
     }
 

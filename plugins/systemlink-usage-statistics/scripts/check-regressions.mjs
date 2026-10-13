@@ -68,6 +68,7 @@ const withFetch = async (handler, action) => {
 const context = () => ({
   buildApiUrl: path => path,
   buildRequestInit: init => init,
+  isServiceInstalled: async () => true,
 });
 
 test('Super User wildcard statements without a resource restriction are administrators', () => {
@@ -194,6 +195,92 @@ test('system summary authorization failures do not become zero totals', async ()
   }, null);
   assert.equal(outcome.attempt, null);
   assert.equal(outcome.unauthorized, true);
+});
+
+test('template paging preserves 401/403 as Unauthorized', async () => {
+  const service = new UsageMetricsService(context());
+  await withFetch(async () => response({}, 403), async () => {
+    const outcome = await service.probeCount({
+      key: 'work-item-templates',
+      label: 'Templates',
+      detail: '',
+      requests: [],
+    }, null);
+    assert.equal(outcome.attempt, null);
+    assert.equal(outcome.unauthorized, true);
+  });
+});
+
+test('a throwing count probe does not fail the dashboard load', async () => {
+  const service = new UsageMetricsService(context());
+  service.loadWorkItemTypeMetrics = async () => { throw new TypeError('mock network failure'); };
+  const partialUpdates = [];
+  const model = await withFetch(async url => {
+    const { pathname } = new URL(url, 'http://localhost');
+    if (pathname === '/niuser/v1/users/query' || pathname.startsWith('/niroutine/')) {
+      throw new TypeError('mock network failure');
+    }
+    if (pathname === '/nitestmonitor/v2/query-results') return response({ count: 7 });
+    if (pathname === '/niworkitem/v1/query-workitem-templates') return response({ workItemTemplates: [] });
+    if (pathname === '/niworkitem/v1/query-workflows' || pathname === '/niworkorder/v1/query-workflows') {
+      return response({ workflows: [] });
+    }
+    if (pathname === '/niworkitem/v1/query-workitems') return response({ workItems: [] });
+    if (pathname === '/niworkitem/v1/workitemtypes') return response({ types: [] });
+    return response({ count: 1 });
+  }, () => service.load(metrics => partialUpdates.push(metrics)));
+
+  const metrics = new Map(model.metrics.map(metric => [metric.key, metric]));
+  for (const key of ['users', 'enabled-routines']) {
+    assert.equal(metrics.get(key)?.value, null);
+    assert.equal(metrics.get(key)?.status, 'unavailable');
+    assert.equal(metrics.get(key)?.source, 'Request failed');
+  }
+  assert.equal(metrics.get('work-items-total')?.value, null);
+  assert.equal(metrics.get('work-items-total')?.status, 'unavailable');
+  assert.equal(metrics.get('work-items-total')?.source, 'Request failed');
+  assert.equal(metrics.get('test-results')?.value, 7);
+  assert.equal(metrics.get('test-results')?.status, 'ok');
+  assert.ok(partialUpdates.length > 0, 'partial updates remain available');
+});
+
+test('partially failed combined workflow scans are unavailable and are not persisted', async () => {
+  const service = new UsageMetricsService(context());
+  await withFetch(async (url, options) => {
+    const { pathname } = new URL(url, 'http://localhost');
+    if (pathname === '/niworkitem/v1/query-workflows') {
+      const body = JSON.parse(options?.body ?? '{}');
+      return body.continuationToken ? response({}, 403) : response({
+        workflows: [{ id: 'workflow-1' }],
+        continuationToken: 'next',
+      });
+    }
+    return response({ workflows: [] });
+  }, async () => {
+    const outcome = await service.probeCount({
+      key: 'work-flows',
+      label: 'Workflows',
+      detail: '',
+      requests: [],
+    }, null);
+    assert.equal(outcome.attempt, null);
+    assert.equal(outcome.unauthorized, true);
+
+    let persisted = null;
+    const component = Object.create(HomePageComponent.prototype);
+    component.tagStatisticsService = {
+      writeAllMetrics: async metrics => { persisted = metrics; },
+    };
+    await component.writeAllTags({
+      metrics: [{
+        key: 'work-flows',
+        value: null,
+        status: 'unauthorized',
+      }],
+      refreshedAt: new Date().toISOString(),
+    });
+    assert.deepEqual(persisted, []);
+  });
 });
 
 test('default count parsing remains bound to the service', async () => {
@@ -344,14 +431,16 @@ test('saved regional and legacy language preferences resolve to supported langua
   try {
     Object.defineProperty(globalThis, 'localStorage', {
       configurable: true,
+      value: {
+        getItem: key => key === 'language' ? 'invalid-locale' : key === 'skyline-api-languages' ? 'ja-JP,fr' : null,
+      },
+    });
+    assert.equal(getSystemLinkLanguage(), 'ja');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
       value: { getItem: key => key === 'language' ? 'de-DE' : null },
     });
     assert.equal(getSystemLinkLanguage(), 'de');
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      value: { getItem: key => key === 'skyline-api-languages' ? 'ja-JP,fr' : null },
-    });
-    assert.equal(getSystemLinkLanguage(), 'ja');
   } finally {
     if (originalStorage) {
       Object.defineProperty(globalThis, 'localStorage', originalStorage);
