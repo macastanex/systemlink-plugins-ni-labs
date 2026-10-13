@@ -1,16 +1,16 @@
 import assert from 'node:assert/strict';
+import { computeMsgId } from '@angular/compiler';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 
 const pluginDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const syncScript = path.join(pluginDirectory, 'scripts', 'i18n-sync.mjs');
 const localeDirectory = path.join(pluginDirectory, 'src', 'locale');
-const localeFiles = ['de', 'fr', 'ja', 'zh'].map(
-  language => path.join(localeDirectory, `messages.${language}.json`)
-);
+const languages = ['de', 'fr', 'ja', 'zh'];
 const placeholderTokens = value => [...value.matchAll(/\{\$[A-Z0-9_]+\}/g)].map(match => match[0]).sort();
 let server;
 let serverUrl;
@@ -27,13 +27,14 @@ after(async () => {
   await new Promise(resolve => server.close(resolve));
 });
 
-test('i18n sync refuses to overwrite locale files when SystemLink translations are unavailable', async () => {
-  const originalFiles = await Promise.all(localeFiles.map(file => readFile(file)));
+test('i18n sync preserves every locale when SystemLink translations are unavailable', async () => {
+  const fixture = await createFixture({ '1': 'Manual' }, { 'Manual': 'Manual translation' });
+  const originalFiles = await snapshotCatalogs(fixture);
   const result = await new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
-      ['scripts/i18n-sync.mjs', '--server', serverUrl],
-      { cwd: pluginDirectory }
+      [syncScript, '--server', serverUrl],
+      { cwd: fixture.directory }
     );
     let stdout = '';
     let stderr = '';
@@ -42,15 +43,114 @@ test('i18n sync refuses to overwrite locale files when SystemLink translations a
     child.on('error', reject);
     child.on('close', code => resolve({ code, stdout, stderr }));
   });
-  const currentFiles = await Promise.all(localeFiles.map(file => readFile(file)));
-
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /refusing to overwrite its locale file/);
-  assert.deepEqual(currentFiles, originalFiles);
+  try {
+    const currentFiles = await snapshotCatalogs(fixture);
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /refusing to overwrite its locale file/);
+    assert.deepEqual(currentFiles, originalFiles);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
 });
 
-test('i18n sync refuses partial harvests when any catalog would be incomplete', async () => {
-  const originalFiles = await Promise.all(localeFiles.map(file => readFile(file)));
+test('i18n sync rejects a nonempty partial harvest before writing any locale', async () => {
+  configureTranslationResponses({ '999999999999': 'Unrelated native translation' });
+  const fixture = await createFixture(
+    {
+      [computeMsgId('Missing native', '')]: 'Missing native',
+      [computeMsgId('Manual', '')]: 'Manual'
+    },
+    { Manual: 'Manual translation' }
+  );
+  const originalFiles = await snapshotCatalogs(fixture);
+  try {
+    const result = await runSync(fixture);
+    const currentFiles = await snapshotCatalogs(fixture);
+
+    assert.equal(result.code, 1);
+    assert.match(result.stderr, /untranslated messages/);
+    assert.match(result.stderr, /Refusing to overwrite locale files/);
+    assert.deepEqual(currentFiles, originalFiles);
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+test('i18n sync preserves manual fallback and native-translation precedence', async () => {
+  const manualId = computeMsgId('Manual', '');
+  const nativeId = computeMsgId('Native wins', '');
+  configureTranslationResponses({ [nativeId]: 'SystemLink native translation' });
+  const fixture = await createFixture(
+    {
+      [manualId]: 'Manual',
+      [nativeId]: 'Native wins'
+    },
+    {
+      Manual: 'Manual translation',
+      'Native wins': 'Manual fallback'
+    }
+  );
+  try {
+    const result = await runSync(fixture);
+    assert.equal(result.code, 0, result.stderr);
+    for (const language of languages) {
+      const catalog = JSON.parse(
+        await readFile(path.join(fixture.localeDirectory, `messages.${language}.json`), 'utf8')
+      );
+      assert.deepEqual(catalog.translations, {
+        [manualId]: 'Manual translation',
+        [nativeId]: 'SystemLink native translation'
+      });
+    }
+  } finally {
+    await rm(fixture.directory, { recursive: true, force: true });
+  }
+});
+
+async function createFixture(sourceTranslations, manualTranslations) {
+  const directory = await mkdtemp(path.join(pluginDirectory, 'scripts', '.i18n-sync-test-'));
+  const localeDirectory = path.join(directory, 'src', 'locale');
+  await mkdir(path.join(localeDirectory, 'manual'), { recursive: true });
+  await writeFile(
+    path.join(localeDirectory, 'messages.json'),
+    JSON.stringify({ locale: 'en-US', translations: sourceTranslations })
+  );
+  await Promise.all(languages.map(async language => {
+    await writeFile(
+      path.join(localeDirectory, 'manual', `${language}.json`),
+      JSON.stringify(manualTranslations)
+    );
+    await writeFile(
+      path.join(localeDirectory, `messages.${language}.json`),
+      `preserve-${language}`
+    );
+  }));
+  return { directory, localeDirectory };
+}
+
+async function snapshotCatalogs(fixture) {
+  return Promise.all(
+    languages.map(language => readFile(path.join(fixture.localeDirectory, `messages.${language}.json`)))
+  );
+}
+
+function runSync(fixture) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      [syncScript, '--server', serverUrl],
+      { cwd: fixture.directory }
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', chunk => (stdout += chunk));
+    child.stderr.setEncoding('utf8').on('data', chunk => (stderr += chunk));
+    child.on('error', reject);
+    child.on('close', code => resolve({ code, stdout, stderr }));
+  });
+}
+
+function configureTranslationResponses(translations) {
   server.removeAllListeners('request');
   server.on('request', (request, response) => {
     if (request.url === '/webapps/') {
@@ -61,32 +161,12 @@ test('i18n sync refuses partial harvests when any catalog would be incomplete', 
         'getJa:()=>import("./chunk-ABC.js"),getZh:()=>import("./chunk-ABC.js")'
       );
     } else if (request.url === '/webapps/chunk-ABC.js') {
-      response.writeHead(200).end('{"999999999999":"Unrelated native message"}');
+      response.writeHead(200).end(JSON.stringify(translations));
     } else {
       response.writeHead(503).end();
     }
   });
-
-  const result = await new Promise((resolve, reject) => {
-    const child = spawn(
-      process.execPath,
-      ['scripts/i18n-sync.mjs', '--server', serverUrl],
-      { cwd: pluginDirectory }
-    );
-    let stdout = '';
-    let stderr = '';
-    child.stdout.setEncoding('utf8').on('data', chunk => (stdout += chunk));
-    child.stderr.setEncoding('utf8').on('data', chunk => (stderr += chunk));
-    child.on('error', reject);
-    child.on('close', code => resolve({ code, stdout, stderr }));
-  });
-  const currentFiles = await Promise.all(localeFiles.map(file => readFile(file)));
-
-  assert.equal(result.code, 1);
-  assert.match(result.stderr, /untranslated messages/);
-  assert.match(result.stderr, /Refusing to overwrite locale files/);
-  assert.deepEqual(currentFiles, originalFiles);
-});
+}
 
 test('locale catalogs retain source keys and interpolation placeholders', async () => {
   const source = JSON.parse(await readFile(path.join(localeDirectory, 'messages.json'), 'utf8')).translations;
