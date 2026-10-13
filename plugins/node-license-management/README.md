@@ -32,6 +32,7 @@ per-node detail with links back to the source system and its latest test result.
 These requests use the generated SystemLink clients with same-origin credentials.
 HTTP 429/503 responses retry with backoff; each attempt sends a fresh clone of the
 request so POST bodies and JSON headers are preserved.
+Network failures propagate unchanged rather than becoming empty SDK responses.
 
 Run `npm test` from this directory to check the SDK endpoints, credentials,
 headers, POST-body replay, retry limits, and network-error propagation.

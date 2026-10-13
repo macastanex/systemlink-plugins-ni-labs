@@ -148,6 +148,15 @@ export class WebappHomeDataService {
         fetch: fetchWithContext,
       }),
     );
+    // Keep network failures as rejections, but let HTTP capability probes inspect their response.
+    for (const client of [this.systemsManagementClient, this.testMonitorClient]) {
+      client.interceptors.error.use((error, response) => {
+        if (!response) {
+          throw error;
+        }
+        return error;
+      });
+    }
   }
 
   async load(): Promise<HomePageModel> {

@@ -71,8 +71,11 @@ try {
     assert.equal(service.activeRequests, 0);
   }
 
-  globalThis.fetch = async () => { throw new TypeError('Network failure'); };
+  const networkError = new TypeError('Network failure');
+  globalThis.fetch = async () => { throw networkError; };
   await assert.rejects(service.fetchWithRetry('https://systemlink.invalid/query', {}), /Network failure/);
+  await assert.rejects(service.queryAllSystems('id != null', 'new(id)'), (error) => error === networkError);
+  await assert.rejects(service.queryTestResults({ take: 1 }), (error) => error === networkError);
   assert.equal(service.activeRequests, 0);
 
   let active = 0;
