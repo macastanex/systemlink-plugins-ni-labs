@@ -32,4 +32,5 @@ Nimble components.
 | Configurable endpoints from `assets/test-mapping.json` | Probe each service's health (e.g. `/niauth/v1/policies`, `/nidataframe/v1/tables`, `/ninotebook/v1/notebook/query`, `/nitaghistorian/v2/tags/query-history`, `/nilocation/v1/locations`, and others) |
 
 Run `npm run test:i18n` to verify locale catalog keys and interpolation placeholders,
-and that an unavailable SystemLink translation harvest cannot overwrite checked-in catalogs.
+and that empty or incomplete SystemLink translation harvests cannot overwrite any checked-in
+locale catalogs.

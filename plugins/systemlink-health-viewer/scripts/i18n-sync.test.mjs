@@ -49,6 +49,45 @@ test('i18n sync refuses to overwrite locale files when SystemLink translations a
   assert.deepEqual(currentFiles, originalFiles);
 });
 
+test('i18n sync refuses partial harvests when any catalog would be incomplete', async () => {
+  const originalFiles = await Promise.all(localeFiles.map(file => readFile(file)));
+  server.removeAllListeners('request');
+  server.on('request', (request, response) => {
+    if (request.url === '/webapps/') {
+      response.writeHead(200).end('<script src="main-ABC.js"></script>');
+    } else if (request.url === '/webapps/main-ABC.js') {
+      response.writeHead(200).end(
+        'getDe:()=>import("./chunk-ABC.js"),getFr:()=>import("./chunk-ABC.js"),' +
+        'getJa:()=>import("./chunk-ABC.js"),getZh:()=>import("./chunk-ABC.js")'
+      );
+    } else if (request.url === '/webapps/chunk-ABC.js') {
+      response.writeHead(200).end('{"999999999999":"Unrelated native message"}');
+    } else {
+      response.writeHead(503).end();
+    }
+  });
+
+  const result = await new Promise((resolve, reject) => {
+    const child = spawn(
+      process.execPath,
+      ['scripts/i18n-sync.mjs', '--server', serverUrl],
+      { cwd: pluginDirectory }
+    );
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8').on('data', chunk => (stdout += chunk));
+    child.stderr.setEncoding('utf8').on('data', chunk => (stderr += chunk));
+    child.on('error', reject);
+    child.on('close', code => resolve({ code, stdout, stderr }));
+  });
+  const currentFiles = await Promise.all(localeFiles.map(file => readFile(file)));
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /untranslated messages/);
+  assert.match(result.stderr, /Refusing to overwrite locale files/);
+  assert.deepEqual(currentFiles, originalFiles);
+});
+
 test('locale catalogs retain source keys and interpolation placeholders', async () => {
   const source = JSON.parse(await readFile(path.join(localeDirectory, 'messages.json'), 'utf8')).translations;
   const sourceIds = Object.keys(source).sort();

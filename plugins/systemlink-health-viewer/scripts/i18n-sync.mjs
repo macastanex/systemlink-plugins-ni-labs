@@ -144,6 +144,7 @@ if (!source) {
   process.exit(1);
 }
 
+const staged = [];
 for (const language of LANGUAGES) {
   const manual = readJson(path.join(localeDir, 'manual', `${language}.json`), {});
   const translations = {};
@@ -164,6 +165,19 @@ for (const language of LANGUAGES) {
     }
   }
 
+  staged.push({ language, translations, missing, fromSystemLink, fromManual });
+}
+
+const incomplete = staged.filter(({ missing }) => Object.keys(missing).length > 0);
+if (incomplete.length > 0) {
+  for (const { language, missing } of incomplete) {
+    console.error(`${language}: ${Object.keys(missing).length} untranslated messages`);
+  }
+  console.error('Refusing to overwrite locale files when any requested language is incomplete.');
+  process.exit(1);
+}
+
+for (const { language, translations, missing, fromSystemLink, fromManual } of staged) {
   fs.writeFileSync(
     path.join(localeDir, `messages.${language}.json`),
     `${JSON.stringify({ locale: language, translations }, null, 2)}\n`,
