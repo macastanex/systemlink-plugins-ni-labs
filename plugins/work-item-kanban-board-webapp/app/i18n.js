@@ -2,7 +2,7 @@
 // Translations reuse SystemLink's own wording where SystemLink ships the same message; the rest
 // are hand-written using SystemLink terminology and should get a native-speaker review.
 
-const SYSTEMLINK_LANGUAGES = ['fr', 'de', 'ja', 'zh', 'en', 'ko'];
+const SYSTEMLINK_LANGUAGES = ['fr', 'de', 'ja', 'zh', 'en'];
 
 function toLanguage(locale) {
     return (locale ?? '').split(/[-_]/)[0].trim().toLowerCase();
@@ -19,10 +19,15 @@ function readLocalStorage(key) {
 
 // Mirrors the SystemLink shell: saved preference, then browser language, then English.
 function getSystemLinkLanguage() {
-    const stored = readLocalStorage('language')
-        ?? readLocalStorage('skyline-api-languages')?.split(',')[0];
-    if (stored && SYSTEMLINK_LANGUAGES.includes(stored)) {
-        return stored;
+    const storedCandidates = [
+        readLocalStorage('language'),
+        readLocalStorage('skyline-api-languages')?.split(',')[0],
+    ];
+    for (const candidate of storedCandidates) {
+        const language = toLanguage(candidate);
+        if (SYSTEMLINK_LANGUAGES.includes(language)) {
+            return language;
+        }
     }
     const browserCandidates = [
         globalThis.navigator?.languages?.[0],

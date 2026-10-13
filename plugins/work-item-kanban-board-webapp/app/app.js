@@ -893,7 +893,7 @@ function renderBoard() {
         const countEl = document.getElementById(`count-${state}`);
         const stateItems = items.filter(w => w.state === state);
 
-        countEl.textContent = stateItems.length;
+        countEl.textContent = stateItems.length.toLocaleString(language);
         col.innerHTML = '';
 
         const sorted = [...stateItems].sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));

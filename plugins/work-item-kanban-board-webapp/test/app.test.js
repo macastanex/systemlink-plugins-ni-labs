@@ -18,7 +18,7 @@ function deferred() {
     return { promise, resolve, reject };
 }
 
-function createHarness() {
+function createHarness({ preserveRenderBoard = false } = {}) {
     const elements = new Map();
     const cards = [];
     const renders = [];
@@ -32,9 +32,17 @@ function createHarness() {
             addEventListener() {},
             getElementById(id) {
                 if (!elements.has(id)) {
-                    elements.set(id, { setAttribute() {}, removeAttribute() {} });
+                    elements.set(id, {
+                        children: [],
+                        setAttribute() {},
+                        removeAttribute() {},
+                        appendChild(child) { this.children.push(child); },
+                    });
                 }
                 return elements.get(id);
+            },
+            createElement() {
+                return { addEventListener() {}, remove() {} };
             },
             querySelectorAll() { return cards; },
         },
@@ -55,7 +63,7 @@ function createHarness() {
     vm.runInContext(source, context);
     vm.runInContext(`
         allWorkItems = [{ id: 'probe', name: 'Probe', state: 'NEW', assignedTo: 'user' }];
-        renderBoard = () => recordRender(allWorkItems);
+        ${preserveRenderBoard ? '' : 'renderBoard = () => recordRender(allWorkItems);'}
         populateTypeFilter = () => {};
         populateAssigneeFilter = () => {};
         showSuccess = () => {};
@@ -147,4 +155,19 @@ test('user loading updates labels without rebuilding active inline editors', asy
     assert.equal(label.textContent, 'Alex Morgan');
     assert.equal(label.title, 'Alex Morgan');
     assert.match(card['aria-label'], /Alex Morgan/);
+});
+
+test('column counts use locale-aware number grouping', () => {
+    const harness = createHarness({ preserveRenderBoard: true });
+    vm.runInContext(`
+        getFilteredItems = () => Array.from({ length: 1000 }, (_, id) => ({
+            id: String(id), state: 'NEW', updatedAt: 0,
+        }));
+        createCard = () => ({});
+        renderBoard();
+    `, harness.context);
+    assert.equal(
+        harness.context.document.getElementById('count-NEW').textContent,
+        (1000).toLocaleString(i18n.language),
+    );
 });
