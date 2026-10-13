@@ -65,6 +65,7 @@
     "3989043143780751122": "Wird aktualisiert",
     "6683510378967159192": "Konfigurationsfehler",
     "2543652287386894087": "Verbindung zur SystemLink-API nicht möglich. Überprüfen Sie die API-URL und die Anmeldeinformationen.",
+    "2740469145875926965": "SystemLink-Dienststatusanzeige",
     "6811901802533648897": "k. A.",
     "5456883408823332299": "Die Konfiguration der Integritätsprüfung konnte nicht geladen werden.",
     "6327948048528357570": "Unerwarteter Fehler bei der Integritätsprüfung: {$details}",

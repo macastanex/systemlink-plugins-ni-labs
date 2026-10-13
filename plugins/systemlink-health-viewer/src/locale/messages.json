@@ -65,6 +65,7 @@
     "3989043143780751122": "Refreshing",
     "6683510378967159192": "Configuration error",
     "2543652287386894087": "Unable to connect to SystemLink API. Please check the API URL and credentials.",
+    "2740469145875926965": "SystemLink Health Viewer",
     "6811901802533648897": "N/A",
     "5456883408823332299": "Unable to load health-check configuration.",
     "6327948048528357570": "Unexpected health-check failure: {$details}",

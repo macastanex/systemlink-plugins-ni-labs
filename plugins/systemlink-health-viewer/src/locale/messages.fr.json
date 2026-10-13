@@ -65,6 +65,7 @@
     "3989043143780751122": "Actualisation",
     "6683510378967159192": "Erreur de configuration",
     "2543652287386894087": "Impossible de se connecter à l'API SystemLink. Vérifiez l'URL de l'API et les identifiants.",
+    "2740469145875926965": "Visionneuse d’état des services SystemLink",
     "6811901802533648897": "N/A",
     "5456883408823332299": "Impossible de charger la configuration des contrôles d'intégrité.",
     "6327948048528357570": "Échec inattendu du contrôle d'intégrité : {$details}",

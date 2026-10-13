@@ -4,7 +4,7 @@ import { Observable, throwError } from 'rxjs';
 import { catchError, map } from 'rxjs/operators';
 import { EndpointHealth, HealthConfigurationError, SystemLinkService } from './systemlink.service';
 import { AppModule } from './app.module';
-import { NOT_AVAILABLE } from './display-text';
+import { APPLICATION_TITLE, NOT_AVAILABLE } from './display-text';
 
 type StatusFilter = 'all' | 'functional' | 'failed' | 'unauthorized';
 
@@ -54,7 +54,7 @@ interface TestMappingDocument {
   imports: [AppModule]
 })
 export class AppComponent implements OnInit, OnDestroy {
-  title = 'SystemLink Health Viewer';
+  title = APPLICATION_TITLE;
   appDisplayVersion: string | null = null;
   theme: 'light' | 'dark' = 'light';
   endpointHealth: EndpointHealth[] = [];

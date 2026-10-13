@@ -28,6 +28,7 @@
   "Refreshing": "Wird aktualisiert",
   "Configuration error": "Konfigurationsfehler",
   "Unable to connect to SystemLink API. Please check the API URL and credentials.": "Verbindung zur SystemLink-API nicht möglich. Überprüfen Sie die API-URL und die Anmeldeinformationen.",
+  "SystemLink Health Viewer": "SystemLink-Dienststatusanzeige",
   "Unable to load health-check configuration.": "Die Konfiguration der Integritätsprüfung konnte nicht geladen werden.",
   "Unexpected health-check failure: {$details}": "Unerwarteter Fehler bei der Integritätsprüfung: {$details}",
   "Network request failed (possible CORS, CSP, or connectivity issue) for {$method} {$endpoint}": "Netzwerkanforderung für {$method} {$endpoint} fehlgeschlagen (mögliches CORS-, CSP- oder Verbindungsproblem)",

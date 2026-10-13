@@ -28,6 +28,7 @@
   "Refreshing": "正在刷新",
   "Configuration error": "配置错误",
   "Unable to connect to SystemLink API. Please check the API URL and credentials.": "无法连接到 SystemLink API。请检查 API URL 和凭据。",
+  "SystemLink Health Viewer": "SystemLink 健康状态查看器",
   "Unable to load health-check configuration.": "无法加载健康检查配置。",
   "Unexpected health-check failure: {$details}": "意外的健康检查失败: {$details}",
   "Network request failed (possible CORS, CSP, or connectivity issue) for {$method} {$endpoint}": "{$method} {$endpoint} 的网络请求失败（可能是 CORS、CSP 或连接问题）",

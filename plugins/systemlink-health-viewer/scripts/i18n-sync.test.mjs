@@ -7,9 +7,11 @@ import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 
 const pluginDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const localeDirectory = path.join(pluginDirectory, 'src', 'locale');
 const localeFiles = ['de', 'fr', 'ja', 'zh'].map(
-  language => path.join(pluginDirectory, 'src', 'locale', `messages.${language}.json`)
+  language => path.join(localeDirectory, `messages.${language}.json`)
 );
+const placeholderTokens = value => [...value.matchAll(/\{\$[A-Z0-9_]+\}/g)].map(match => match[0]).sort();
 let server;
 let serverUrl;
 
@@ -45,4 +47,36 @@ test('i18n sync refuses to overwrite locale files when SystemLink translations a
   assert.equal(result.code, 1);
   assert.match(result.stderr, /refusing to overwrite its locale file/);
   assert.deepEqual(currentFiles, originalFiles);
+});
+
+test('locale catalogs retain source keys and interpolation placeholders', async () => {
+  const source = JSON.parse(await readFile(path.join(localeDirectory, 'messages.json'), 'utf8')).translations;
+  const sourceIds = Object.keys(source).sort();
+
+  for (const language of ['de', 'fr', 'ja', 'zh']) {
+    const catalog = JSON.parse(
+      await readFile(path.join(localeDirectory, `messages.${language}.json`), 'utf8')
+    );
+    assert.equal(catalog.locale, language);
+    assert.deepEqual(Object.keys(catalog.translations).sort(), sourceIds, `${language} source keys`);
+    for (const [id, english] of Object.entries(source)) {
+      assert.deepEqual(
+        placeholderTokens(catalog.translations[id]),
+        placeholderTokens(english),
+        `${language}/${id} placeholders`
+      );
+    }
+
+    const manual = JSON.parse(
+      await readFile(path.join(localeDirectory, 'manual', `${language}.json`), 'utf8')
+    );
+    for (const [english, translated] of Object.entries(manual)) {
+      assert.ok(Object.values(source).includes(english), `${language} manual key: ${english}`);
+      assert.deepEqual(
+        placeholderTokens(translated),
+        placeholderTokens(english),
+        `${language} manual placeholders: ${english}`
+      );
+    }
+  }
 });

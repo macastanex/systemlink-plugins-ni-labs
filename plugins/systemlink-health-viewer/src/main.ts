@@ -47,7 +47,11 @@ async function bootstrap(): Promise<void> {
   document.documentElement.lang = language;
 
   // Imported after translations load so module-level $localize strings are translated.
-  const { AppComponent } = await import('./app/app.component');
+  const [{ AppComponent }, { APPLICATION_TITLE }] = await Promise.all([
+    import('./app/app.component'),
+    import('./app/display-text')
+  ]);
+  document.title = APPLICATION_TITLE;
   await bootstrapApplication(AppComponent, {
     providers: [
       provideHttpClient(),
