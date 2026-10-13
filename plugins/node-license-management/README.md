@@ -29,6 +29,13 @@ per-node detail with links back to the source system and its latest test result.
 | `/nisysmgmt/v1/query-systems`     | Load managed and virtual systems and their grains                       |
 | `/nitestmonitor/v2/query-results` | Find host/`SYSTEM_ID` pairs per month and resolve latest result details |
 
+These requests use the generated SystemLink clients with same-origin credentials.
+HTTP 429/503 responses retry with backoff; each attempt sends a fresh clone of the
+request so POST bodies and JSON headers are preserved.
+
+Run `npm test` from this directory to check the SDK endpoints, credentials,
+headers, POST-body replay, retry limits, and network-error propagation.
+
 ## Local Demo Mode
 
 Start the app from this directory with `npm start`, then open:

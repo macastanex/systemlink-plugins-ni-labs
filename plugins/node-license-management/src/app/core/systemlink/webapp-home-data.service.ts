@@ -653,8 +653,9 @@ export class WebappHomeDataService {
 
   /** Fetch wrapper that retries on 429/503 with backoff (honoring Retry-After). */
   private async fetchWithRetry(url: RequestInfo | URL, init: RequestInit, maxRetries = 6): Promise<Response> {
+    const request = new Request(url, init);
     for (let attempt = 0; ; attempt++) {
-      const response = await this.withSlot(() => fetch(url, init));
+      const response = await this.withSlot(() => fetch(request.clone()));
       if ((response.status !== 429 && response.status !== 503) || attempt >= maxRetries) {
         return response;
       }
