@@ -64,6 +64,7 @@ import {
   IUpdateWorkitemTemplateRequest,
   IWorkitemTemplate,
   IDashboardReferenceDefinition,
+  ResourceFilterType,
 } from '../../../core/models/workitem-templates.models';
 import { IWorkflow } from '../../../core/models/workflow.models';
 import { AuthService } from '../../../core/services/auth/auth.service';
@@ -110,8 +111,17 @@ import {
   PermissionService,
   WORK_ITEM_TEMPLATE_ACTIONS,
 } from '../../../core/services/permission/permission.service';
-import { SystemService } from '../../../core/services/system/system.service';
-import { AssetService } from '../../../core/services/asset/asset.service';
+import { createSystemFilterFields, SystemService } from '../../../core/services/system/system.service';
+import { AssetService, createAssetFilterFields } from '../../../core/services/asset/asset.service';
+import { ResourceFilterLanguageService } from '../../../core/services/resource-filter-language/resource-filter-language.service';
+import {
+  groupsToLucene,
+  IResourceFilterCondition,
+  IResourceFilterGroup,
+  normalizeFilterExpression,
+  parseLuceneGroups,
+  ResourceFilterKind,
+} from '../../utils/resource-filter-lucene.utils';
 import {
   IDynamicFormTemplateContext,
   IResolvedDynamicField,
@@ -158,20 +168,8 @@ interface IStagedFileUpload {
   errorMessage: string | null;
 }
 
-interface ISystemFilterCondition {
-  property: string;
-  propertyName?: string;
-  /** Operator joining this condition to the previous one in its group (unused for the first row). */
-  logicalOperator: 'AND' | 'OR';
-  operator: string;
-  value: string;
-}
-
-interface ISystemFilterGroup {
-  /** Operator joining this group to the previous one (unused for the first group). */
-  logicalOperator: 'AND' | 'OR';
-  conditions: ISystemFilterCondition[];
-}
+type ISystemFilterCondition = IResourceFilterCondition;
+type ISystemFilterGroup = IResourceFilterGroup;
 
 /** Default operation used for a freshly added condition row before a field is chosen. */
 const DEFAULT_FILTER_OPERATION = FilterOperation.Equals;
@@ -202,12 +200,28 @@ const PACKAGE_VERSION_COMPARATORS: Partial<Record<FilterOperation, string>> = {
 
 type FilterControlName = 'systemFilter' | 'dutFilter' | 'fixturesFilter' | 'assetsFilter';
 
-const FILTER_CONTROL_NAMES: readonly string[] = [
+const FILTER_CONTROL_NAMES: readonly FilterControlName[] = [
   'systemFilter',
   'dutFilter',
   'fixturesFilter',
   'assetsFilter',
 ];
+
+/** Example filters shown as placeholders, per query language. */
+const FILTER_EXAMPLES: Record<ResourceFilterType, Record<FilterControlName, string>> = {
+  LINQ: {
+    systemFilter: 'properties.data["Lab"] = "Battery Pack Lab"',
+    dutFilter: 'ModelName = "cRIO-9045" && SerialNumber = "01E82ED0"',
+    fixturesFilter: 'AssetType = "FIXTURE" && ModelName.Contains("Bench")',
+    assetsFilter: 'ModelName.Contains("MSO") && VendorName = "Tektronix"',
+  },
+  LUCENE: {
+    systemFilter: 'properties.Lab:"Battery Pack Lab"',
+    dutFilter: 'ModelName:"cRIO-9045" AND SerialNumber:"01E82ED0"',
+    fixturesFilter: 'AssetType:"FIXTURE" AND ModelName:"*Bench*"',
+    assetsFilter: 'ModelName:"*MSO*" AND VendorName:"Tektronix"',
+  },
+};
 
 const nonEmptyArrayValidator: ValidatorFn = (control) =>
   Array.isArray(control.value) && control.value.length > 0 ? null : { required: true };
@@ -278,6 +292,8 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
   protected readonly showSystemFilterValidation = signal(false);
   private activeFilterControl: FilterControlName = 'systemFilter';
   private readonly queryDraftByFilter = new Map<FilterControlName, ISystemFilterGroup[]>();
+  /** Language of the resource filters: LUCENE when the server has search enabled, else LINQ. */
+  protected readonly filterLanguage = signal<ResourceFilterType>('LINQ');
 
   /** Selected products with display names for chip display. */
   protected readonly selectedProducts = signal<ISelectedProduct[]>([]);
@@ -536,9 +552,11 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
     private readonly fileService: FileService,
     private readonly dynamicFormFieldsService: DynamicFormFieldsService,
     private readonly permissionService: PermissionService,
+    private readonly resourceFilterLanguageService: ResourceFilterLanguageService,
     @Inject(LOCALE_ID) private readonly locale: string,
   ) {
     this.form = this.buildForm();
+    this.resourceFilterLanguageService.language$.pipe(take(1), takeUntil(this.destroy$)).subscribe();
 
     merge(
       this.form.statusChanges,
@@ -862,6 +880,7 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
     } else {
       this.isConfigDataLoading.set(false);
     }
+    this.resolveFilterLanguage(mode === 'edit' ? template : undefined);
 
     // Ensure the tab selection is reset even if the tab component keeps internal state.
     queueMicrotask(() => this.resetToConfigurationStep());
@@ -1217,7 +1236,7 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
       this.systemFilterGroups.set(parsed);
     } else {
       const filterControl = this.form.controls.templateDetails.controls[controlName];
-      parsed = this.parseSystemFilter(filterControl.value);
+      parsed = this.parseActiveFilter(filterControl.value);
       this.systemFilterGroups.set(parsed);
       this.queryDraftByFilter.set(controlName, this.cloneGroups(parsed));
     }
@@ -1453,7 +1472,7 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
   /** Cancels system filter edits in the dialog. */
   protected cancelSystemFilterDialog(): void {
     const control = this.form.controls.templateDetails.controls[this.activeFilterControl];
-    const committed = this.parseSystemFilter(control.value);
+    const committed = this.parseActiveFilter(control.value);
     this.systemFilterGroups.set(committed);
     this.showSystemFilterValidation.set(false);
     this.queryDraftByFilter.set(this.activeFilterControl, this.cloneGroups(committed));
@@ -1461,10 +1480,8 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
   }
 
   /**
-   * Applies the dialog groups to the active filter field. Each condition row is converted to a
-   * standalone-library {@link FilterCondition} and rendered with `buildLinqFilter` / `conditionToLinq`;
-   * groups are combined with `combineFilters`. The resulting Dynamic LINQ string is what the
-   * SystemLink query services accept, and is stored on the filter form control.
+   * Applies the dialog groups to the active filter field, rendered in the template's filter language:
+   * Lucene for the search services, or Dynamic LINQ (`buildLinqFilter` / `conditionToLinq`).
    */
   protected applySystemFilterDialog(): void {
     if (!this.isSystemFilterDialogValid()) {
@@ -1474,17 +1491,135 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
 
     this.showSystemFilterValidation.set(false);
 
-    const groupExpressions = this.systemFilterGroups()
-      .map((group) => ({ expression: this.groupToLinq(group), logicalOperator: group.logicalOperator }))
-      .filter((group) => group.expression.length > 0);
-
-    const expression = this.combineGroupExpressions(groupExpressions);
+    const groups = this.systemFilterGroups();
+    const expression =
+      this.filterLanguage() === 'LUCENE'
+        ? groupsToLucene(groups, this.activeFilterKind()) ?? ''
+        : this.groupsToLinq(groups);
 
     const control = this.form.controls.templateDetails.controls[this.activeFilterControl];
     control.setValue(expression);
     control.markAsDirty();
-    this.queryDraftByFilter.set(this.activeFilterControl, this.cloneGroups(this.systemFilterGroups()));
+    this.queryDraftByFilter.set(this.activeFilterControl, this.cloneGroups(groups));
     this.systemFilterDialogRef().close(undefined);
+  }
+
+  /** Renders query-builder groups to one Dynamic LINQ expression for the active filter. */
+  private groupsToLinq(groups: ISystemFilterGroup[]): string {
+    const groupExpressions = groups
+      .map((group) => ({ expression: this.groupToLinq(group), logicalOperator: group.logicalOperator }))
+      .filter((group) => group.expression.length > 0);
+
+    return this.combineGroupExpressions(groupExpressions);
+  }
+
+  /** The search index the active filter targets: systems, or assets for DUTs/fixtures/assets. */
+  private activeFilterKind(): ResourceFilterKind {
+    return this.activeFilterControl === 'systemFilter' ? 'systems' : 'assets';
+  }
+
+  /** Parses the active filter's text into query-builder groups using the current filter language. */
+  private parseActiveFilter(expression: string): ISystemFilterGroup[] {
+    if (this.filterLanguage() === 'LINQ') {
+      return this.parseSystemFilter(expression);
+    }
+
+    const { groups } = parseLuceneGroups(expression, this.activeFilterKind());
+    return groups.length > 0 ? groups : [{ logicalOperator: 'AND', conditions: [this.createEmptyCondition()] }];
+  }
+
+  /** Placeholder example for a filter field in the current filter language. */
+  protected filterPlaceholder(controlName: FilterControlName): string {
+    return $localize`e.g., ${FILTER_EXAMPLES[this.filterLanguage()][controlName]}:example:`;
+  }
+
+  protected readonly luceneTooltipExamples = {
+    systems: 'minionDetails.serialNumber:"01E82ED0"',
+    duts: 'ModelName:"cRIO-9045" AND SerialNumber:"01E82ED0"',
+  };
+
+  /**
+   * Starts each panel session in the template's stored filter language (LINQ for new templates),
+   * then switches to the language the server supports once the search probe resolves.
+   */
+  private resolveFilterLanguage(template?: IWorkitemTemplate): void {
+    const session = this.panelSession;
+    this.filterLanguage.set(template?.resources?.filterType ?? 'LINQ');
+
+    this.resourceFilterLanguageService.language$
+      .pipe(take(1), takeUntil(this.destroy$))
+      .subscribe((supported) => {
+        if (session === this.panelSession) {
+          this.switchFilterLanguage(supported);
+        }
+      });
+  }
+
+  /**
+   * Converts every resource filter to `target`. All filters of a template share one language, so
+   * when any filter cannot be converted faithfully the template keeps its current language.
+   */
+  private switchFilterLanguage(target: ResourceFilterType): void {
+    const current = this.filterLanguage();
+    if (current === target) {
+      return;
+    }
+
+    const controls = this.form.controls.templateDetails.controls;
+    const converted = new Map<FilterControlName, string>();
+    for (const name of FILTER_CONTROL_NAMES) {
+      const value = controls[name].value.trim();
+      if (!value) {
+        continue;
+      }
+      const result = this.convertFilter(name, value, current, target);
+      if (result === null) {
+        return;
+      }
+      converted.set(name, result);
+    }
+
+    converted.forEach((value, name) => controls[name].setValue(value, { emitEvent: false }));
+    this.queryDraftByFilter.clear();
+    this.filterLanguage.set(target);
+  }
+
+  /**
+   * Converts one filter between LINQ and Lucene through the query-builder rows. Returns null unless
+   * the source re-renders exactly from those rows, so nothing the builder cannot model is lost.
+   */
+  private convertFilter(
+    controlName: FilterControlName,
+    expression: string,
+    from: ResourceFilterType,
+    to: ResourceFilterType,
+  ): string | null {
+    const previousControl = this.activeFilterControl;
+    const previousFields = this.activeFilterFields();
+    this.activeFilterControl = controlName;
+    this.activeFilterFields.set(
+      controlName === 'systemFilter' ? createSystemFilterFields() : createAssetFilterFields(),
+    );
+
+    try {
+      const kind = this.activeFilterKind();
+      if (from === 'LINQ') {
+        const groups = this.parseSystemFilter(expression);
+        const faithful =
+          normalizeFilterExpression(this.groupsToLinq(groups)) === normalizeFilterExpression(expression);
+        return faithful ? groupsToLucene(groups, kind, true) : null;
+      }
+
+      const { groups, complete } = parseLuceneGroups(expression, kind);
+      const faithful =
+        complete &&
+        normalizeFilterExpression(groupsToLucene(groups, kind, true) ?? '') ===
+          normalizeFilterExpression(expression);
+      return faithful && to === 'LINQ' ? this.groupsToLinq(groups) || null : null;
+    } finally {
+      this.activeFilterControl = previousControl;
+      this.activeFilterFields.set(previousFields);
+    }
   }
 
   /**
@@ -3038,7 +3173,7 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
     this.detailsStepValid.set(
       Object.entries(this.form.controls.templateDetails.controls).every(
         ([name, control]) =>
-          FILTER_CONTROL_NAMES.includes(name) || control.valid || control.disabled,
+          FILTER_CONTROL_NAMES.includes(name as FilterControlName) || control.valid || control.disabled,
       ),
     );
     this.fileConfigValid.set(this.form.controls.fileConfiguration.valid);
@@ -3272,8 +3407,7 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
     }
 
     return {
-      // This app authors LINQ expressions; tag them so the API does not default to LUCENE (SLE 2026-10).
-      filterType: 'LINQ',
+      filterType: this.filterLanguage(),
       ...(hasSystem ? { systems: { filter: details.systemFilter } } : {}),
       ...(hasDut ? { duts: { filter: details.dutFilter } } : {}),
       ...(hasFixtures ? { fixtures: { filter: details.fixturesFilter } } : {}),

@@ -58,8 +58,8 @@ export interface IWorkitemTemplateResourceFilter {
 }
 
 /**
- * Query language used to evaluate the resource filters.
- * SLE 2026-10 defaults omitted values to LUCENE; this app authors LINQ expressions.
+ * Query language used to evaluate the resource filters. LUCENE needs the Elasticsearch-backed
+ * search services; SLE 2026-10 defaults omitted values to LUCENE, so the app always sets it.
  */
 export type ResourceFilterType = 'LINQ' | 'LUCENE';
 

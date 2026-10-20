@@ -398,7 +398,13 @@
           <h4 class="section-heading">
             <ng-container i18n>Filters</ng-container>
             <nimble-icon-info-circle id="filters-info" class="info-icon"></nimble-icon-info-circle>
-            <nimble-tooltip anchor="filters-info"><ng-container i18n>Filter expressions to scope the test plan to specific systems or DUTs. Use property names and logical operators (e.g., systems: grains.data.serialnumber = "01E82ED0"; DUTs: ModelName = "cRIO-9045" &amp;&amp; SerialNumber = "01E82ED0").</ng-container></nimble-tooltip>
+            <nimble-tooltip anchor="filters-info">
+              @if (filterLanguage() === 'LUCENE') {
+                <ng-container i18n>Filter expressions to scope the test plan to specific systems or DUTs. Use field names, quoted values, and AND, OR, or NOT (e.g., systems: {{ luceneTooltipExamples.systems }}; DUTs: {{ luceneTooltipExamples.duts }}).</ng-container>
+              } @else {
+                <ng-container i18n>Filter expressions to scope the test plan to specific systems or DUTs. Use property names and logical operators (e.g., systems: grains.data.serialnumber = "01E82ED0"; DUTs: ModelName = "cRIO-9045" &amp;&amp; SerialNumber = "01E82ED0").</ng-container>
+              }
+            </nimble-tooltip>
           </h4>
 
           @if (!hasSupportedFilters()) {
@@ -410,8 +416,7 @@
               <nimble-text-field
                 formControlName="systemFilter"
                 appearance="underline"
-                placeholder='e.g., properties.data["Lab"] = "Battery Pack Lab"'
-                i18n-placeholder
+                [placeholder]="filterPlaceholder('systemFilter')"
                 [required-visible]="isFieldMandatory('RESOURCES.SYSTEMS')"
                 [error-visible]="hasRequiredError(form.controls.templateDetails.controls.systemFilter)"
                 error-text="This field is required."
@@ -440,8 +445,7 @@
               <nimble-text-field
                 formControlName="dutFilter"
                 appearance="underline"
-                placeholder='e.g., ModelName = "cRIO-9045" && SerialNumber = "01E82ED0"'
-                i18n-placeholder
+                [placeholder]="filterPlaceholder('dutFilter')"
                 [required-visible]="isFieldMandatory('RESOURCES.DUTS')"
                 [error-visible]="hasRequiredError(form.controls.templateDetails.controls.dutFilter)"
                 error-text="This field is required."
@@ -470,8 +474,7 @@
               <nimble-text-field
                 formControlName="fixturesFilter"
                 appearance="underline"
-                placeholder='e.g., AssetType = "FIXTURE" && ModelName.Contains("Bench")'
-                i18n-placeholder
+                [placeholder]="filterPlaceholder('fixturesFilter')"
                 [required-visible]="isFieldMandatory('RESOURCES.FIXTURES')"
                 [error-visible]="hasRequiredError(form.controls.templateDetails.controls.fixturesFilter)"
                 error-text="This field is required."
@@ -500,8 +503,7 @@
               <nimble-text-field
                 formControlName="assetsFilter"
                 appearance="underline"
-                placeholder='e.g., ModelName.Contains("MSO") && VendorName = "Tektronix"'
-                i18n-placeholder
+                [placeholder]="filterPlaceholder('assetsFilter')"
                 [required-visible]="isFieldMandatory('RESOURCES.ASSETS')"
                 [error-visible]="hasRequiredError(form.controls.templateDetails.controls.assetsFilter)"
                 error-text="This field is required."

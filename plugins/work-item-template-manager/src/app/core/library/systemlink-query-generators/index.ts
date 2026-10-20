@@ -22,6 +22,7 @@ import { workItems } from './generators/work-items';
 import { QueryGenerator, QueryGeneratorOptions } from './core/query-generator';
 
 export * from './core/linq';
+export * from './core/lucene';
 export * from './core/http';
 export * from './core/client-filter';
 export {

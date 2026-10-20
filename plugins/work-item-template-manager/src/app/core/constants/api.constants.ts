@@ -6,6 +6,8 @@ export const API_ROUTES = {
   queryProducts: '/nitestmonitor/v2/query-products',
   querySystems: '/nisysmgmt/v1/query-systems',
   queryAssets: '/niapm/v1/query-assets',
+  searchSystems: '/nisysmgmt/v1/materialized/search-systems',
+  searchAssets: '/niapm/v1/materialized/search-assets',
   getLocations: '/nilocation/v1/locations',
   queryResults: '/nitestmonitor/v2/query-results',
   queryResultValues: '/nitestmonitor/v2/query-result-values',
