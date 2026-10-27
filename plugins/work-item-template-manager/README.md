@@ -12,6 +12,7 @@ A hosted SystemLink web app for creating and maintaining work item templates (te
 - File attachments (upload new or attach existing files) and custom properties.
 - Dynamic Form Fields: customer-configured request forms appear as tabs and follow their display, read-only, and required rules, matching the native SystemLink work item form.
 - Localized to follow the SystemLink UI language (German, French, Japanese, Chinese; English otherwise).
+- Follows SystemLink's theme, defaulting to dark if the browser blocks access to stored preferences.
 
 ## Requirements
 

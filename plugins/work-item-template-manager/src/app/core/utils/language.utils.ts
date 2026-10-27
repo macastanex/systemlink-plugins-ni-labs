@@ -8,11 +8,15 @@ export function toLanguage(locale: string | null | undefined): string {
   return (locale ?? '').split(/[-_]/)[0].trim().toLowerCase();
 }
 
-function readLocalStorage(key: string): string | null {
+/** Reads a saved UI preference, falling back when iframe storage access is denied. */
+export function readLocalStorage(key: string): string | null {
   try {
     return globalThis.localStorage?.getItem(key) ?? null;
-  } catch {
-    // Storage is inaccessible in some sandboxed iframes.
+  } catch (error) {
+    if (!(error instanceof DOMException) || error.name !== 'SecurityError') {
+      throw error;
+    }
+    console.warn('Local storage is inaccessible; using default UI preferences.', error);
     return null;
   }
 }

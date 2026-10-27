@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, ChangeDetectorRef, Component, OnDestroy, OnInit } from '@angular/core';
 import { Theme } from '@ni/nimble-angular';
+import { readLocalStorage } from './core/utils/language.utils';
 
 const THEME_STORAGE_KEY = 'theme';
 
@@ -49,7 +50,7 @@ export class AppComponent implements OnInit, OnDestroy {
 
   /** Reads the stored theme key from local storage and returns it if valid, else dark. */
   private loadThemeFromStorage(): Theme {
-    const storedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+    const storedTheme = readLocalStorage(THEME_STORAGE_KEY);
 
     if (storedTheme) {
       const validThemes = Object.values(Theme) as string[];
