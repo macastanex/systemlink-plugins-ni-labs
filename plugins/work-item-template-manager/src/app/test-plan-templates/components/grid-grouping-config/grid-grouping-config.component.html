@@ -23,7 +23,13 @@
 
           <div class="item">
             <nimble-icon-four-dots-square class="drag-handle handle" />
-            <nimble-select [formControlName]="index" class="select" filter-mode="standard">
+            <nimble-select
+              [formControlName]="index"
+              class="select"
+              filter-mode="standard"
+              aria-label="Grouping"
+              i18n-aria-label
+            >
               @for (column of availableFields(ctrl); track column.id) {
                 <nimble-list-option [ngValue]="column.id">
                   {{ column.label }}

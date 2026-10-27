@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { map, Observable } from 'rxjs';
 import { IQueryResultValuesRequest, IQueryResultsRequest } from '../../models/test-result.models';
 import { TestResultHttpService } from '../test-result-http/test-result-http.service';
+import { escapeLinqString } from '../../library/systemlink-query-generators/core/linq';
 
 /** Business logic for test result queries. */
 @Injectable({
@@ -16,7 +17,7 @@ export class TestResultService {
 
   /** Returns distinct program names observed in test results for a workspace. */
   public queryProgramNamesByWorkspace(workspaceId: string): Observable<string[]> {
-    const safeWorkspaceId = workspaceId.replace(/"/g, '\\"');
+    const safeWorkspaceId = escapeLinqString(workspaceId);
     const request: IQueryResultValuesRequest = {
       field: 'PROGRAM_NAME',
       take: TestResultService.RESULT_VALUES_BATCH_SIZE,
@@ -38,8 +39,8 @@ export class TestResultService {
     workspaceId: string,
     testProgram: string,
   ): Observable<number | undefined> {
-    const safeWorkspaceId = workspaceId.replace(/"/g, '\\"');
-    const safeProgram = testProgram.replace(/"/g, '\\"');
+    const safeWorkspaceId = escapeLinqString(workspaceId);
+    const safeProgram = escapeLinqString(testProgram);
     const request: IQueryResultsRequest = {
       filter: `workspace == "${safeWorkspaceId}" && programName == "${safeProgram}"`,
       take: 1,

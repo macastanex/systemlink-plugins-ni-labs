@@ -51,6 +51,7 @@ export class TestplanDuplicateSlideoutComponent implements OnDestroy {
   );
 
   private sourceTemplate: IWorkitemTemplate | undefined;
+  private panelSession = 0;
   private readonly destroy$ = new Subject<void>();
 
   /** Creates an instance of TestplanDuplicateSlideoutComponent. */
@@ -80,21 +81,12 @@ export class TestplanDuplicateSlideoutComponent implements OnDestroy {
     this.destroy$.complete();
   }
 
-  /** Whether the duplicate button should be disabled. */
-  protected readonly isSaveDisabled = (): boolean => this.isSaving() || this.form.invalid;
-
-  /** Only workspaces the user can create templates in. */
-  protected workspaceOptions(workspaces: IAuthWorkspace[]): IAuthWorkspace[] {
-    return workspaces.filter((workspace) =>
-      this.permissionService.can(WORK_ITEM_TEMPLATE_ACTIONS.create, workspace.id),
-    );
-  }
-
   /**
    * Opens the slideout for the given source template. Name defaults to empty, description to the
    * template's current value, and workspace to the template's current (source) workspace.
    */
   public openPanel(template: IWorkitemTemplate): void {
+    this.panelSession += 1;
     this.sourceTemplate = template;
     this.isSaving.set(false);
 
@@ -113,8 +105,19 @@ export class TestplanDuplicateSlideoutComponent implements OnDestroy {
     this.syncWorkspaceSelectValue(workspace);
   }
 
+  /** Whether the duplicate button should be disabled. */
+  protected readonly isSaveDisabled = (): boolean => this.isSaving() || this.form.invalid;
+
+  /** Only workspaces the user can create templates in. */
+  protected workspaceOptions(workspaces: IAuthWorkspace[]): IAuthWorkspace[] {
+    return workspaces.filter((workspace) =>
+      this.permissionService.can(WORK_ITEM_TEMPLATE_ACTIONS.create, workspace.id),
+    );
+  }
+
   /** Closes the slideout without duplicating. */
   protected onCancel(): void {
+    this.panelSession += 1;
     this.drawerDirective().close(undefined);
   }
 
@@ -129,11 +132,12 @@ export class TestplanDuplicateSlideoutComponent implements OnDestroy {
   protected onDuplicate(): void {
     this.form.markAllAsTouched();
 
-    if (this.form.invalid || !this.sourceTemplate) {
+    if (this.isSaving() || this.form.invalid || !this.sourceTemplate) {
       return;
     }
 
     const { name, description, workspace } = this.form.getRawValue();
+    const session = this.panelSession;
     this.isSaving.set(true);
 
     this.templateService
@@ -144,11 +148,20 @@ export class TestplanDuplicateSlideoutComponent implements OnDestroy {
       })
       .pipe(
         takeUntil(this.destroy$),
-        finalize(() => this.isSaving.set(false)),
+        finalize(() => {
+          if (session === this.panelSession) {
+            this.isSaving.set(false);
+          }
+        }),
       )
       .subscribe({
-        next: () => this.drawerDirective().close(undefined),
+        next: () => {
+          if (session === this.panelSession) {
+            this.drawerDirective().close(undefined);
+          }
+        },
         // Errors surface via the global notification banner interceptor.
+        // eslint-disable-next-line @typescript-eslint/no-empty-function
         error: () => {},
       });
   }
@@ -158,7 +171,11 @@ export class TestplanDuplicateSlideoutComponent implements OnDestroy {
    * since nimble-select cannot resolve a selected option bound before its options exist.
    */
   private syncWorkspaceSelectValue(value: string): void {
+    const session = this.panelSession;
     const apply = (): void => {
+      if (session !== this.panelSession) {
+        return;
+      }
       const select = this.workspaceSelectRef()?.nativeElement;
       if (select) {
         select.value = '';

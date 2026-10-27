@@ -3,7 +3,7 @@
   <div class="row">
     <div class="item">
       <nimble-icon-four-dots-square class="drag-handle pinned" />
-      <nimble-select disabled class="select">
+      <nimble-select disabled class="select" aria-label="Columns" i18n-aria-label>
         <nimble-list-option i18n>Name</nimble-list-option>
       </nimble-select>
       <nimble-button
@@ -50,6 +50,8 @@
               i18n-error-text
               class="select"
               filter-mode="standard"
+              aria-label="Columns"
+              i18n-aria-label
             >
               @for (column of availableProperties(ctrl); track column.id) {
                 <nimble-list-option [ngValue]="column.id">

@@ -7,6 +7,7 @@ import {
 } from '../../models/product.models';
 import { PART_NUMBER_FILTER_BATCH_SIZE, PRODUCT_BATCH_SIZE } from '../../constants/api.constants';
 import { ProductHttpService } from '../product-http/product-http.service';
+import { escapeLinqString } from '../../library/systemlink-query-generators/core/linq';
 
 /** Stateless service that fetches product data via the products API. */
 @Injectable({
@@ -18,10 +19,10 @@ export class ProductService {
 
   /** Fetches all products belonging to the given product family, optionally scoped to a workspace. */
   public queryProductsByFamily(family: string, workspace?: string): Observable<IProduct[]> {
-    const safeFamily = family.replace(/"/g, '\\"');
+    const safeFamily = escapeLinqString(family);
 
     const filter = workspace
-      ? `workspace == "${workspace.replace(/"/g, '\\"')}" && family == "${safeFamily}"`
+      ? `workspace == "${escapeLinqString(workspace)}" && family == "${safeFamily}"`
       : `family == "${safeFamily}"`;
 
     return this.getAllProducts({
@@ -32,7 +33,7 @@ export class ProductService {
 
   /** Fetches unique product families available in a workspace. */
   public queryProductFamiliesByWorkspace(workspace: string): Observable<string[]> {
-    const safeWorkspace = workspace.replace(/"/g, '\\"');
+    const safeWorkspace = escapeLinqString(workspace);
 
     return this.getAllProducts({
       filter: `workspace == "${safeWorkspace}"`,
@@ -47,7 +48,7 @@ export class ProductService {
 
   /** Fetches all products in a workspace. */
   public queryProductsByWorkspace(workspace: string): Observable<IProduct[]> {
-    const safeWorkspace = workspace.replace(/"/g, '\\"');
+    const safeWorkspace = escapeLinqString(workspace);
 
     return this.getAllProducts({
       filter: `workspace == "${safeWorkspace}"`,
@@ -122,7 +123,7 @@ export class ProductService {
 
   /** Builds a safe filter clause for a single part number. */
   private buildPartNumberClause(partNumber: string): string {
-    return `partNumber == "${partNumber.replace(/"/g, '\\"')}"`;
+    return `partNumber == "${escapeLinqString(partNumber)}"`;
   }
 
   /** Splits part numbers into batches to keep filter strings at a reasonable size. */

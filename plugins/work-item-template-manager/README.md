@@ -31,6 +31,7 @@ The app runs as the signed-in user and never handles credentials. Actions are li
 | User Data | Read/Write | Grid column and filter preferences |
 | Test Monitor | Read | Products, test programs, estimated duration |
 | Systems Management, Asset Management | Read | Resource filter builder values; search availability (Lucene vs. LINQ) |
+| Location | Read | Physical-location options in resource filters (also proxied during development) |
 | User, Auth | Read | User names, workspaces, permissions |
 | Dashboard host | Read | Dashboard selection |
 

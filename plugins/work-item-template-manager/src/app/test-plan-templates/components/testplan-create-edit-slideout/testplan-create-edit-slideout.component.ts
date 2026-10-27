@@ -864,6 +864,7 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
    */
   public openPanel(mode: 'create' | 'edit', template?: IWorkitemTemplate): void {
     this.panelSession += 1;
+    this.isSaving.set(false);
     this.isEditMode.set(mode === 'edit');
     this.resetToConfigurationStep();
     this.templateToEdit = template;
@@ -2732,12 +2733,17 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
 
   /** Closes the drawer without saving any changes. */
   protected onCancel(): void {
+    this.panelSession += 1;
     this.resetToConfigurationStep();
     this.drawerDirective().close(undefined);
   }
 
   /** Validates all steps and dispatches create or update. */
   protected onSave(): void {
+    if (this.isSaving()) {
+      return;
+    }
+
     this.form.markAllAsTouched();
 
     if (this.form.controls.templateDetails.invalid) {
@@ -2772,14 +2778,21 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
     }
 
     this.isSaving.set(true);
+    const session = this.panelSession;
 
     const onSaveSuccess = (): void => {
-      this.drawerDirective().close(undefined);
+      if (session === this.panelSession) {
+        this.drawerDirective().close(undefined);
+      }
     };
 
     const saveOperators = [
       takeUntil(this.destroy$),
-      finalize(() => this.isSaving.set(false)),
+      finalize(() => {
+        if (session === this.panelSession) {
+          this.isSaving.set(false);
+        }
+      }),
     ] as const;
 
     const uploadedFileIds = this.selectedFiles()

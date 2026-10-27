@@ -19,6 +19,7 @@ export default [
       '/nifile',
       '/nisysmgmt',
       '/niapm',
+      '/nilocation',
       '/dashboardhost',
     ],
     target: TARGET_URL,
