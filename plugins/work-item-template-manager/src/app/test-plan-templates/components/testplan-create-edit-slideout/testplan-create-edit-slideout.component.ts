@@ -3123,16 +3123,17 @@ export class TestplanCreateEditSlideoutComponent implements OnDestroy {
     const partNumbers = template.partNumbers ?? [];
     if (partNumbers.length > 0) {
       this.productService
-        .fetchProductNameFromPartNumbers(partNumbers)
+        .fetchProductNameFromPartNumbers(partNumbers, template.workspace ?? '')
         .pipe(take(1), takeUntil(this.destroy$))
         .subscribe((nameMap) => {
           if (session !== this.panelSession) {
             return;
           }
+          const workspaceNames = nameMap.get(template.workspace ?? '');
           this.selectedProducts.set(
             partNumbers.map((pn) => ({
               partNumber: pn,
-              displayName: nameMap.get(pn) ? `${nameMap.get(pn)} [${pn}]` : pn,
+              displayName: workspaceNames?.get(pn) ? `${workspaceNames.get(pn)} [${pn}]` : pn,
             })),
           );
         });

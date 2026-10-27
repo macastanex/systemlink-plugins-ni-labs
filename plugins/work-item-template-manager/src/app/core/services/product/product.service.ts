@@ -4,6 +4,7 @@ import {
   IProduct,
   IQueryProductsRequest,
   IQueryProductsResponse,
+  ProductNameMap,
 } from '../../models/product.models';
 import { PART_NUMBER_FILTER_BATCH_SIZE, PRODUCT_BATCH_SIZE } from '../../constants/api.constants';
 import { ProductHttpService } from '../product-http/product-http.service';
@@ -64,24 +65,30 @@ export class ProductService {
     );
   }
 
-  /** Fetches a part-number-to-product-name map for the given part numbers. */
-  public fetchProductNameFromPartNumbers(partNumbers: string[]): Observable<Map<string, string>> {
+  /** Fetches workspace-scoped product names, optionally limiting the query to one workspace. */
+  public fetchProductNameFromPartNumbers(
+    partNumbers: string[],
+    workspace?: string,
+  ): Observable<ProductNameMap> {
     const uniquePartNumbers = [...new Set(partNumbers.filter(Boolean))];
 
     if (uniquePartNumbers.length === 0) {
-      return of(new Map<string, string>());
+      return of(new Map<string, Map<string, string>>());
     }
 
     return forkJoin(
       this.chunkPartNumbers(uniquePartNumbers).map((partNumberBatch) =>
         this.getAllProducts({
-          filter: this.buildPartNumbersFilter(partNumberBatch),
-          projection: ['name', 'partNumber'],
+          filter:
+            workspace === undefined
+              ? this.buildPartNumbersFilter(partNumberBatch)
+              : `workspace == "${escapeLinqString(workspace)}" && ${this.buildPartNumbersFilter(partNumberBatch)}`,
+          projection: ['name', 'partNumber', 'workspace'],
         }),
       ),
     ).pipe(
       map((productBatches) => productBatches.flat()),
-      map((products) => this.mapPartNumbersToProductNames(uniquePartNumbers, products)),
+      map((products) => this.mapPartNumbersToProductNames(products)),
     );
   }
 
@@ -137,25 +144,21 @@ export class ProductService {
     return chunks;
   }
 
-  /** Maps requested part numbers to the best available product name, falling back to the part number. */
-  private mapPartNumbersToProductNames(
-    requestedPartNumbers: string[],
-    products: IProduct[],
-  ): Map<string, string> {
-    return new Map(
-      requestedPartNumbers.map((partNumber) => [
-        partNumber,
-        this.resolveProductName(products, partNumber),
-      ]),
-    );
-  }
+  /** Keeps the first non-empty name for each workspace and part number. */
+  private mapPartNumbersToProductNames(products: IProduct[]): ProductNameMap {
+    const names: ProductNameMap = new Map();
+    for (const product of products) {
+      if (!product.name) {
+        continue;
+      }
+      const workspace = product.workspace ?? '';
+      const workspaceNames = names.get(workspace) ?? new Map<string, string>();
+      if (!workspaceNames.has(product.partNumber)) {
+        workspaceNames.set(product.partNumber, product.name);
+      }
+      names.set(workspace, workspaceNames);
+    }
 
-  /** Picks the best available product name, falling back to the part number when not found. */
-  private resolveProductName(products: IProduct[], partNumber: string): string {
-    const exactMatch = products.find(
-      (product) => product.partNumber === partNumber && product.name,
-    );
-
-    return exactMatch?.name ?? partNumber;
+    return names;
   }
 }

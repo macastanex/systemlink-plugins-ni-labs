@@ -20,3 +20,6 @@ export interface IQueryProductsResponse {
   continuationToken?: string;
   totalCount?: number;
 }
+
+/** Product names indexed by workspace, then part number. */
+export type ProductNameMap = Map<string, Map<string, string>>;

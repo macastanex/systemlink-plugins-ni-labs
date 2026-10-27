@@ -18,6 +18,7 @@ import { TableRecord } from '@ni/nimble-angular/table';
 import { AuthService } from '../../../core/services/auth/auth.service';
 import { UserService } from '../../../core/services/user/user.service';
 import { ProductService } from '../../../core/services/product/product.service';
+import { ProductNameMap } from '../../../core/models/product.models';
 import {
   IWorkitemTemplate,
   ICreateWorkitemTemplateRequest,
@@ -46,7 +47,7 @@ export class TestplanTemplateService {
   public readonly tableRecords$: Observable<{
     templates: IWorkitemTemplate[];
     records: TableRecord[];
-    prodMap: Map<string, string>;
+    prodMap: ProductNameMap;
   }>;
 
   private readonly templatesSubject = new BehaviorSubject<IWorkitemTemplate[]>([]);
@@ -57,7 +58,7 @@ export class TestplanTemplateService {
   private readonly userNameMap$: Observable<Map<string, string>>;
   private readonly productNameMap$: Observable<{
     templates: IWorkitemTemplate[];
-    prodMap: Map<string, string>;
+    prodMap: ProductNameMap;
   }>;
 
   /**
@@ -106,8 +107,8 @@ export class TestplanTemplateService {
       switchMap((templates) => {
         const partNumbers = templates.flatMap((template) => template.partNumbers ?? []);
         return this.productService.fetchProductNameFromPartNumbers(partNumbers).pipe(
-          defaultIfEmpty(new Map<string, string>()),
-          catchError(() => of(new Map<string, string>())),
+          defaultIfEmpty(new Map<string, Map<string, string>>()),
+          catchError(() => of(new Map<string, Map<string, string>>())),
           map((prodMap) => ({ templates, prodMap })),
         );
       }),
@@ -282,8 +283,14 @@ export class TestplanTemplateService {
   }
 
   /** Resolves part numbers to distinct product names while preserving first-seen order. */
-  public resolveProductNames(partNumbers: string[], prodMap: Map<string, string>): string[] {
-    return [...new Set(partNumbers.map((partNumber) => prodMap.get(partNumber) ?? partNumber))];
+  public resolveProductNames(
+    partNumbers: string[],
+    prodMap: ProductNameMap,
+    workspace: string | null,
+  ): string[] {
+    return [...new Set(
+      partNumbers.map((partNumber) => prodMap.get(workspace ?? '')?.get(partNumber) ?? partNumber),
+    )];
   }
 
   /** Escapes filter values before placing them into API filter strings. */
@@ -297,7 +304,7 @@ export class TestplanTemplateService {
     allPropertyKeys: string[],
     workspaceMap: Map<string, string>,
     userMap: Map<string, string>,
-    prodMap: Map<string, string>,
+    prodMap: ProductNameMap,
   ): TableRecord[] {
     return templates.map((template) => {
       const record: TableRecord = {
@@ -305,7 +312,7 @@ export class TestplanTemplateService {
         name: template.name,
         productFamily: (template.productFamilies ?? []).join(', '),
         product: (template.partNumbers ?? [])
-          .map((partNumber) => prodMap.get(partNumber) ?? partNumber)
+          .map((partNumber) => prodMap.get(template.workspace ?? '')?.get(partNumber) ?? partNumber)
           .join(', '),
         category: template.templateGroup ?? '',
         workspaceId: template.workspace ?? '',

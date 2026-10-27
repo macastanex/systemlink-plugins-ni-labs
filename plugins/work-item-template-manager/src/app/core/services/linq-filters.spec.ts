@@ -18,6 +18,7 @@ describe('service LINQ filters', () => {
     service.queryProductFamiliesByWorkspace(value).subscribe();
     service.queryProductsByWorkspace(value).subscribe();
     service.fetchProductNameFromPartNumbers([value]).subscribe();
+    service.fetchProductNameFromPartNumbers([value], value).subscribe();
 
     expect(http.queryProducts.calls.allArgs().map(([request]) => request.filter)).toEqual([
       `family == ${literal}`,
@@ -25,6 +26,12 @@ describe('service LINQ filters', () => {
       `workspace == ${literal}`,
       `workspace == ${literal}`,
       `(partNumber == ${literal})`,
+      `workspace == ${literal} && (partNumber == ${literal})`,
+    ]);
+    expect(http.queryProducts.calls.mostRecent().args[0].projection).toEqual([
+      'name',
+      'partNumber',
+      'workspace',
     ]);
   });
 

@@ -6,7 +6,7 @@ A hosted SystemLink web app for creating and maintaining work item templates (te
 
 - Searchable grid of all work item templates with cascading filters (workspace, type, product family, product, group), configurable columns, and grouping. Preferences are saved per user.
 - Create, edit, duplicate (into another workspace), and delete (single or multiple) templates.
-- Product families and products, workflow, test program, estimated duration, summary, and description.
+- Product families and products (names resolved per workspace), workflow, test program, estimated duration, summary, and description.
 - Resource filters for systems, DUTs, fixtures, and assets using a visual query builder or a typed expression. Filters are written in Lucene when the server has advanced search (Elasticsearch) enabled, and in LINQ otherwise; the app detects this automatically and converts existing filters when it can do so without loss.
 - Dashboard selection with dashboard parameters.
 - File attachments (upload new or attach existing files) and custom properties.

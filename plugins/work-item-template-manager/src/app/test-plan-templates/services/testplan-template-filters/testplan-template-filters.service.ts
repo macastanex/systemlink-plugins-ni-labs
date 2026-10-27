@@ -2,6 +2,7 @@ import { Injectable } from '@angular/core';
 import { BehaviorSubject, finalize, merge, Observable, Subject, switchMap, tap } from 'rxjs';
 import { TableRecord } from '@ni/nimble-angular/table';
 import { IWorkitemTemplate } from '../../../core/models/workitem-templates.models';
+import { ProductNameMap } from '../../../core/models/product.models';
 import { TEMPLATE_PRODUCT_FAMILIES } from '../../constants/product-family.constants';
 import { IFilterCascade, ITemplateFilters } from '../../models/template-filters.models';
 import { TestplanTemplateService } from '../testplan-template/testplan-template.service';
@@ -45,7 +46,7 @@ export class TestplanTemplateFiltersService {
   private searchableFieldNames: string[] = ['name', 'summary', 'description'];
   private allRecords: TableRecord[] = [];
   private workspaceTemplates: IWorkitemTemplate[] = [];
-  private workspaceProductMap = new Map<string, string>();
+  private workspaceProductMap: ProductNameMap = new Map();
 
   /** Sets up the reactive data pipeline. On each loadTrigger$ emission, calls the API (workspace-only filter when rebuilding cascade, full filter otherwise), waits for tableRecords$ to emit the resolved result, then updates dropdown options and filtered records. Also re-triggers on template deletion. */
   public constructor(private readonly templateService: TestplanTemplateService) {
@@ -235,7 +236,7 @@ export class TestplanTemplateFiltersService {
   /** Maps a template's part numbers to resolved product names using the current workspace product map. */
   private resolveProducts(template: IWorkitemTemplate): string[] {
     return this.templateService
-      .resolveProductNames(template.partNumbers ?? [], this.workspaceProductMap)
+      .resolveProductNames(template.partNumbers ?? [], this.workspaceProductMap, template.workspace)
       .filter((name) => !!name);
   }
 
@@ -294,13 +295,19 @@ export class TestplanTemplateFiltersService {
   /** Returns all part numbers whose resolved product name matches the given product name. Used to build the API filter clause for a product selection. */
   private findPartNumbersForProduct(productName: string): string[] {
     const result: string[] = [];
-    this.workspaceProductMap.forEach((name, partNumber) => {
-      if (name === productName) {
-        result.push(partNumber);
+    const activeWorkspace = this.activeFiltersSubject.getValue().workspace;
+    for (const [workspace, products] of this.workspaceProductMap) {
+      if (activeWorkspace && workspace !== activeWorkspace) {
+        continue;
       }
-    });
+      products.forEach((name, partNumber) => {
+        if (name === productName) {
+          result.push(partNumber);
+        }
+      });
+    }
 
-    return result;
+    return [...new Set(result)];
   }
 
   /** Filters allRecords client-side by the active workspace, product family, product, category, and search text, then emits the result to filteredRecords$. */
